@@ -9,6 +9,8 @@ import {
   FinanceDedupeApplyPayload,
   SortColumnApplyPayload,
   VatRemoveApplyPayload,
+  HighlightNegativeApplyPayload,
+  SumColumnApplyPayload,
   SeedHolidaysApplyPayload,
   NetworkdaysDueApplyPayload
 } from "../intents/types";
@@ -344,6 +346,121 @@ async function applyVatRemove(preview: IntentPreview<VatRemoveApplyPayload>): Pr
   };
 }
 
+async function applyHighlightNegative(
+  preview: IntentPreview<HighlightNegativeApplyPayload>
+): Promise<ApplyResult> {
+  const payload = preview.applyPayload;
+  const letter = columnLetterFromIndex(payload.columnIndex);
+  const note = `Zvýraznit záporné hodnoty ${letter}`;
+
+  const { snapshot } = await Excel.run(async (context) => {
+    const sheet = context.workbook.worksheets.getItem(payload.sheetName);
+    const range = sheet.getRangeByIndexes(payload.rowIndex, payload.columnIndex, payload.rowCount, 1);
+
+    const undoSnapshot = await captureUndoSnapshot(context, {
+      sheetName: payload.sheetName,
+      rowIndex: payload.rowIndex,
+      columnIndex: payload.columnIndex,
+      rowCount: payload.rowCount,
+      columnCount: 1,
+      note
+    });
+
+	let targetRange = range;
+	const dataStartOffset = payload.hasHeader ? 1 : 0;
+	const dataRowCount = payload.rowCount - dataStartOffset;
+	if (dataRowCount > 0 && dataRowCount !== payload.rowCount) {
+	  targetRange = range
+	    .getCell(dataStartOffset, 0)
+	    .getResizedRange(dataRowCount - 1, 0);
+	}
+
+	const conditionalFormat = targetRange.conditionalFormats.add(Excel.ConditionalFormatType.cellValue);
+	conditionalFormat.cellValue.rule = {
+	  operator: Excel.ConditionalCellValueOperator.lessThan,
+	  formula1: "0"
+	};
+    conditionalFormat.cellValue.format.fill.color = "#fdecea";
+    conditionalFormat.cellValue.format.font.color = "#842029";
+
+    await recordAuditEntry(context, {
+      intent: preview.intent.type,
+      args: { column: letter },
+      rangeAddress: targetRange.address,
+      note
+    });
+    await recordTelemetryEvent(context, {
+      event: "apply",
+      intent: preview.intent.type
+    });
+    await context.sync();
+
+    return { snapshot: undoSnapshot };
+  });
+
+  const warnings = snapshot.persisted
+    ? undefined
+    : ["Operace příliš velká pro trvalé Zpět; aktuální stav lze vrátit jen pomocí poslední akce Zpět."];
+
+  return {
+	message: `Záporné hodnoty ve sloupci ${letter} jsou zvýrazněny.`,
+    warnings
+  };
+}
+
+async function applySumColumn(preview: IntentPreview<SumColumnApplyPayload>): Promise<ApplyResult> {
+  const payload = preview.applyPayload;
+  const letter = columnLetterFromIndex(payload.columnIndex);
+  const note = `Součet ve sloupci ${letter}`;
+
+  const result = await Excel.run(async (context) => {
+    const sheet = context.workbook.worksheets.getItem(payload.sheetName);
+    const totalRowIndex = payload.rowIndex + payload.rowCount;
+    const totalCell = sheet.getRangeByIndexes(totalRowIndex, payload.columnIndex, 1, 1);
+
+    const undoSnapshot = await captureUndoSnapshot(context, {
+      sheetName: payload.sheetName,
+      rowIndex: totalRowIndex,
+      columnIndex: payload.columnIndex,
+      rowCount: 1,
+      columnCount: 1,
+      note
+    });
+
+    const dataStartRow = payload.rowIndex + (payload.hasHeader ? 1 : 0) + 1;
+    const dataEndRow = payload.rowIndex + payload.rowCount;
+    const address = `${letter}${dataStartRow}:${letter}${dataEndRow}`;
+    totalCell.formulas = [[`=SUM(${address})`]];
+    totalCell.numberFormat = [["0.00"]];
+
+    await recordAuditEntry(context, {
+      intent: preview.intent.type,
+      args: {
+        column: letter,
+        range: address
+      },
+      rangeAddress: totalCell.address,
+      note
+    });
+    await recordTelemetryEvent(context, {
+      event: "apply",
+      intent: preview.intent.type
+    });
+    await context.sync();
+
+    return { snapshot: undoSnapshot, totalAddress: totalCell.address };
+  });
+
+  const warnings = result.snapshot.persisted
+    ? undefined
+    : ["Operace příliš velká pro trvalé Zpět; aktuální stav lze vrátit jen pomocí poslední akce Zpět."];
+
+  return {
+    message: `Součet sloupce ${letter} byl zapsán do ${result.totalAddress}.`,
+    warnings
+  };
+}
+
 async function applyFetchCnbRate(
   preview: IntentPreview<FetchCnbRateApplyPayload>
 ): Promise<ApplyResult> {
@@ -607,6 +724,10 @@ export async function applyIntent(preview: IntentPreview): Promise<ApplyResult> 
       return applySortColumn(preview as IntentPreview<SortColumnApplyPayload>);
     case IntentType.VatRemove:
       return applyVatRemove(preview as IntentPreview<VatRemoveApplyPayload>);
+    case IntentType.HighlightNegative:
+      return applyHighlightNegative(preview as IntentPreview<HighlightNegativeApplyPayload>);
+    case IntentType.SumColumn:
+      return applySumColumn(preview as IntentPreview<SumColumnApplyPayload>);
     case IntentType.FetchCnbRate:
       return applyFetchCnbRate(preview as IntentPreview<FetchCnbRateApplyPayload>);
     case IntentType.FxConvertCnb:

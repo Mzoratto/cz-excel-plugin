@@ -7,6 +7,8 @@ import {
   FinanceDedupeIntent,
   SortColumnIntent,
   VatRemoveIntent,
+  HighlightNegativeIntent,
+  SumColumnIntent,
   SeedHolidaysIntent,
   NetworkdaysDueIntent
 } from "./types";
@@ -33,9 +35,11 @@ const SORT_KEYWORDS = ["serad", "seřaď", "sort", "seřadit", "usporadej", "usp
 const SORT_ASC_KEYWORDS = ["vzestup", "ascending", "nahoru", "vzestupne", "vzestupně"];
 const SORT_DESC_KEYWORDS = ["sestup", "descending", "dolu", "dolů", "sestupne", "sestupně"];
 const VAT_REMOVE_KEYWORDS = ["bez dph", "odeber dph", "odstran dph", "reverse charge", "vycisti dph", "bez dane"];
+const HIGHLIGHT_NEGATIVE_KEYWORDS = ["zvyrazni zaporna", "zvýrazni záporná", "highlight negative", "zvyrazni minus", "obarvi zaporne"];
+const SUM_KEYWORDS = ["součet", "soucet", "sumuj", "sum", "souhrn", "total"];
 
 const COLUMN_PATTERN =
-  /\bsloup(?:ec|ce|ci)\s+([a-záčďéěíňóřšťúůýž]{1,3}|\w?\d+)\b|\bs(?:loupec|l|.)\s*([a-z])\b|\bcolumn\s+([a-z])\b/iu;
+  /\bsloup(?:ec|ce|ci)\s+([a-záčďéěíňóřšťúůýžA-ZÁČĎÉĚÍŇÓŘŠŤÚŮÝŽ]{1,3}|\w?\d+)\b|\bcolumn\s+([a-zA-Z])\b/iu;
 
 const CURRENCY_PATTERN = /\b([A-Z]{3})\b/;
 const SUPPORTED_CURRENCIES = new Set([
@@ -201,6 +205,38 @@ function detectVatRemoveIntent(originalText: string, normalized: string): VatRem
   };
 }
 
+function detectHighlightNegativeIntent(originalText: string, normalized: string): HighlightNegativeIntent | undefined {
+  const mentionsHighlight = HIGHLIGHT_NEGATIVE_KEYWORDS.some((keyword) => normalized.includes(keyword));
+  if (!mentionsHighlight) {
+    return undefined;
+  }
+
+  const columnLetter = extractColumnLetter(originalText);
+
+  return {
+    type: IntentType.HighlightNegative,
+    columnLetter,
+    originalText,
+    confidence: columnLetter ? 0.85 : 0.75
+  };
+}
+
+function detectSumIntent(originalText: string, normalized: string): SumColumnIntent | undefined {
+  const mentionsSum = SUM_KEYWORDS.some((keyword) => normalized.includes(keyword));
+  if (!mentionsSum) {
+    return undefined;
+  }
+
+  const columnLetter = extractColumnLetter(originalText);
+
+  return {
+    type: IntentType.SumColumn,
+    columnLetter,
+    originalText,
+    confidence: columnLetter ? 0.85 : 0.75
+  };
+}
+
 function detectFetchCnbRateIntent(originalText: string, normalized: string): FetchCnbRateIntent | undefined {
   if (!normalized.includes("kurz") || !normalized.includes("cnb")) {
     return undefined;
@@ -315,6 +351,8 @@ export function parseCzechRequest(text: string): ParsedIntentOutcome | null {
     detectDedupeIntent,
     detectVatRemoveIntent,
     detectSortIntent,
+    detectHighlightNegativeIntent,
+    detectSumIntent,
     detectFxConvertIntent,
     detectFetchCnbRateIntent,
     detectSeedHolidaysIntent,

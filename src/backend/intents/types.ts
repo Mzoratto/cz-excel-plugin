@@ -6,6 +6,8 @@ export enum IntentType {
   FinanceDedupe = "finance.dedupe",
   SortColumn = "sheet.sort_column",
   VatRemove = "vat.remove",
+  HighlightNegative = "sheet.highlight_negative",
+  SumColumn = "sheet.sum_column",
   SeedHolidays = "holidays.seed",
   NetworkdaysDue = "schedule.networkdays_due"
 }
@@ -60,6 +62,16 @@ export interface VatRemoveIntent extends IntentBase {
   columnLetter?: string;
 }
 
+export interface HighlightNegativeIntent extends IntentBase {
+  type: IntentType.HighlightNegative;
+  columnLetter?: string;
+}
+
+export interface SumColumnIntent extends IntentBase {
+  type: IntentType.SumColumn;
+  columnLetter?: string;
+}
+
 export interface SeedHolidaysIntent extends IntentBase {
   type: IntentType.SeedHolidays;
   year: number;
@@ -79,6 +91,8 @@ export type SupportedIntent =
   | FinanceDedupeIntent
   | SortColumnIntent
   | VatRemoveIntent
+  | HighlightNegativeIntent
+  | SumColumnIntent
   | SeedHolidaysIntent
   | NetworkdaysDueIntent;
 
@@ -164,6 +178,22 @@ export interface VatRemoveApplyPayload {
   rateLabel: string;
 }
 
+export interface HighlightNegativeApplyPayload {
+  sheetName: string;
+  rowIndex: number;
+  columnIndex: number;
+  rowCount: number;
+  hasHeader: boolean;
+}
+
+export interface SumColumnApplyPayload {
+  sheetName: string;
+  rowIndex: number;
+  columnIndex: number;
+  rowCount: number;
+  hasHeader: boolean;
+}
+
 export type ApplyPayload =
   | VatAddApplyPayload
   | FormatCzkApplyPayload
@@ -172,6 +202,8 @@ export type ApplyPayload =
   | FinanceDedupeApplyPayload
   | SortColumnApplyPayload
   | VatRemoveApplyPayload
+  | HighlightNegativeApplyPayload
+  | SumColumnApplyPayload
   | SeedHolidaysApplyPayload
   | NetworkdaysDueApplyPayload;
 

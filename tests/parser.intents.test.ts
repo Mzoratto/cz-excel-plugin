@@ -58,4 +58,28 @@ describe("parseCzechRequest finance intents", () => {
       expect(outcome.intent.rate).toBeCloseTo(0.21);
     }
   });
+
+  it("detects highlight negative intent", () => {
+    const outcome = parseCzechRequest("Zvýrazni záporná čísla ve sloupci D");
+    expect(outcome).not.toBeNull();
+    if (!outcome) {
+      return;
+    }
+    expect(outcome.intent.type).toBe(IntentType.HighlightNegative);
+    if (outcome.intent.type === IntentType.HighlightNegative) {
+      expect(outcome.intent.columnLetter).toBe("D");
+    }
+  });
+
+  it("detects sum column intent", () => {
+    const outcome = parseCzechRequest("Vypočítej součet ve sloupci E");
+    expect(outcome).not.toBeNull();
+    if (!outcome) {
+      return;
+    }
+    expect(outcome.intent.type).toBe(IntentType.SumColumn);
+    if (outcome.intent.type === IntentType.SumColumn) {
+      expect(outcome.intent.columnLetter).toBe("E");
+    }
+  });
 });

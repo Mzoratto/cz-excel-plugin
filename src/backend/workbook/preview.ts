@@ -18,6 +18,10 @@ import {
   SortColumnApplyPayload,
   VatRemoveIntent,
   VatRemoveApplyPayload,
+  HighlightNegativeIntent,
+  HighlightNegativeApplyPayload,
+  SumColumnIntent,
+  SumColumnApplyPayload,
   SeedHolidaysIntent,
   SeedHolidaysApplyPayload,
   NetworkdaysDueIntent,
@@ -133,6 +137,19 @@ function buildVatSample(intent: VatAddIntent, selection: SelectionSnapshot, hasH
   return {
     headers: ["Základ", `DPH ${intent.rateLabel}`, "S DPH"],
     rows
+  };
+}
+
+function buildSumSample(selection: SelectionSnapshot, hasHeader: boolean): SampleTable {
+  const dataRows = selection.sampleValues.slice(hasHeader ? 1 : 0);
+  const numeric = dataRows
+    .map((row) => parseCzechNumeric(row?.[0]))
+    .filter((value): value is number => value !== null);
+  const previewSum = numeric.slice(0, 5).reduce((acc, value) => acc + value, 0);
+
+  return {
+    headers: ["Náhled součtu"],
+    rows: [[numeric.length > 0 ? formatCzk(previewSum) : "(není co sčítat)"]]
   };
 }
 
@@ -543,6 +560,116 @@ async function buildVatRemovePreview(intent: VatRemoveIntent): Promise<PreviewRe
   });
 }
 
+async function buildHighlightNegativePreview(
+  intent: HighlightNegativeIntent
+): Promise<PreviewResult<HighlightNegativeApplyPayload>> {
+  return Excel.run(async (context) => {
+    const selection = await captureSelection(context);
+    if ("error" in selection) {
+      return { error: selection.error };
+    }
+
+    const issues: string[] = [];
+    const singleColumnIssue = ensureSingleColumn(selection);
+    if (singleColumnIssue) {
+      issues.push(singleColumnIssue);
+    }
+
+    const columnConflict = validateColumnMatch(intent.columnLetter, selection);
+    if (columnConflict) {
+      issues.push(columnConflict);
+    }
+
+    if (issues.length > 0) {
+      return { error: "Nelze připravit zvýraznění záporných hodnot.", issues };
+    }
+
+    const hasHeader = detectHeader(selection);
+    const selectedLetter = columnLetterFromIndex(selection.columnIndex);
+
+    const planItems = [
+      `Přidat podmíněné formátování pro záporné hodnoty ve sloupci ${selectedLetter}.`,
+      "Zvýraznit buňky červeným pozadím a tmavým písmem.",
+      "Zapsat akci do auditu."
+    ];
+
+    const sample: SampleTable = {
+      headers: ["Očekávaný efekt"],
+      rows: [["Záporné hodnoty získají červené pozadí."]]
+    };
+
+    const applyPayload: HighlightNegativeApplyPayload = {
+      sheetName: selection.sheetName,
+      rowIndex: selection.rowIndex,
+      columnIndex: selection.columnIndex,
+      rowCount: selection.rowCount,
+      hasHeader
+    };
+
+    return {
+      intent,
+      issues: [],
+      planText: buildPlanList(planItems),
+      sample,
+      applyPayload
+    };
+  });
+}
+
+async function buildSumColumnPreview(intent: SumColumnIntent): Promise<PreviewResult<SumColumnApplyPayload>> {
+  return Excel.run(async (context) => {
+    const selection = await captureSelection(context);
+    if ("error" in selection) {
+      return { error: selection.error };
+    }
+
+    const issues: string[] = [];
+    const singleColumnIssue = ensureSingleColumn(selection);
+    if (singleColumnIssue) {
+      issues.push(singleColumnIssue);
+    }
+
+    const columnConflict = validateColumnMatch(intent.columnLetter, selection);
+    if (columnConflict) {
+      issues.push(columnConflict);
+    }
+
+    if (selection.rowCount <= 1) {
+      issues.push("Rozsah musí obsahovat alespoň jeden řádek s daty.");
+    }
+
+    if (issues.length > 0) {
+      return { error: "Nelze připravit součet sloupce.", issues };
+    }
+
+    const hasHeader = detectHeader(selection);
+    const selectedLetter = columnLetterFromIndex(selection.columnIndex);
+    const sample = buildSumSample(selection, hasHeader);
+
+    const planItems = [
+      `Spočítat součet všech hodnot ve sloupci ${selectedLetter}.`,
+      "Výsledek zapsat do buňky pod aktuálním výběrem.",
+      "Součet formátovat jako číslo a zapsat akci do auditu."
+    ];
+
+    const applyPayload: SumColumnApplyPayload = {
+      sheetName: selection.sheetName,
+      rowIndex: selection.rowIndex,
+      columnIndex: selection.columnIndex,
+      rowCount: selection.rowCount,
+      hasHeader
+    };
+
+    return {
+      intent,
+      issues: [],
+      planText: buildPlanList(planItems),
+      sample,
+      applyPayload
+    };
+  });
+}
+
 async function buildFetchCnbPreview(
   intent: FetchCnbRateIntent
 ): Promise<PreviewResult<FetchCnbRateApplyPayload>> {
@@ -758,6 +885,10 @@ export async function buildPreview(intent: SupportedIntent): Promise<PreviewResu
       return buildSortPreview(intent);
     case IntentType.VatRemove:
       return buildVatRemovePreview(intent);
+    case IntentType.HighlightNegative:
+      return buildHighlightNegativePreview(intent);
+    case IntentType.SumColumn:
+      return buildSumColumnPreview(intent);
     case IntentType.FetchCnbRate:
       return buildFetchCnbPreview(intent);
     case IntentType.FxConvertCnb:
