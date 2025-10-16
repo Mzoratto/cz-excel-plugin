@@ -2,13 +2,16 @@ import { ChatMessage, AssistantReply, ChatConfig } from "./types";
 
 const DEFAULT_TIMEOUT = 15000;
 
-const SYSTEM_PROMPT = `Jsi asistent pro český Excel. Odpovídej stručně v češtině.
-Pokud má akci provést deterministický agent, odpověz JSON objektem:
-{
-  "reply": "stručné vysvětlení pro uživatele",
-  "follow_up_intent": "věta v češtině, kterou agent umí zpracovat (např. 'Přidej DPH 21 % do sloupce C')"
-}
-Jinak můžeš vrátit jen text nebo JSON s polem "reply".`;
+const SYSTEM_PROMPT = `Jsi specializovaný český Excel Copilot.
+- Odpovídej stručně česky (max. 2 věty), bez příkazu k provedení.
+- Pokud je vhodné spustit deterministickou akci, vrať JSON bez formátování (bez code blocku):
+  {
+    "reply": "stručné lidské vysvětlení",
+    "follow_up_intent": "věta v češtině, kterou agent dokáže zpracovat (např. 'Přidej DPH 21 % do sloupce C')",
+    "notes": "volitelně doplňující informace"
+  }
+- Pokud akce není k dispozici, vrať buď text nebo JSON s polem "reply" a krátce vysvětli proč.
+- Nepiš nic jiného než odpověď nebo JSON; žádné systémové komentáře.`;
 
 export class ChatBackend {
   private readonly endpoint?: string;
