@@ -12,6 +12,7 @@ import {
   HighlightNegativeApplyPayload,
   SumColumnApplyPayload,
   MonthlyRunRateApplyPayload,
+  PeriodComparisonApplyPayload,
   SeedHolidaysApplyPayload,
   NetworkdaysDueApplyPayload
 } from "../intents/types";
@@ -621,6 +622,207 @@ async function applyMonthlyRunRate(preview: IntentPreview<MonthlyRunRateApplyPay
   };
 }
 
+async function applyPeriodComparison(
+  preview: IntentPreview<PeriodComparisonApplyPayload>
+): Promise<ApplyResult> {
+  const payload = preview.applyPayload;
+  const amountAbsolute = columnIndexFromLetter(payload.amountColumnLetter);
+  const dateAbsolute = columnIndexFromLetter(payload.dateColumnLetter);
+  if (amountAbsolute === null || dateAbsolute === null) {
+    throw new Error("Nelze určit sloupce pro porovnání období.");
+  }
+
+  const result = await Excel.run(async (context) => {
+    const sheet = context.workbook.worksheets.getItem(payload.sheetName);
+    const range = sheet.getRangeByIndexes(payload.rowIndex, payload.columnIndex, payload.rowCount, payload.columnCount);
+    range.load("values");
+    await context.sync();
+
+    const data = range.values as (string | number | boolean | Date)[][];
+    const dataStart = payload.hasHeader ? 1 : 0;
+    const amountOffset = amountAbsolute - payload.columnIndex;
+    const dateOffset = dateAbsolute - payload.columnIndex;
+
+    const currentTotals = {
+      month: 0,
+      prevMonth: 0,
+      quarter: 0,
+      prevQuarter: 0,
+      year: 0,
+      prevYear: 0
+    };
+
+    let latestDate: Date | null = null;
+
+    const monthTotals = new Map<string, number>();
+    const quarterTotals = new Map<string, number>();
+    const yearTotals = new Map<number, number>();
+
+    for (let i = dataStart; i < data.length; i += 1) {
+      const row = data[i];
+      if (!row) {
+        continue;
+      }
+      const dateCell = row[dateOffset];
+      const amount = parseCzechNumeric(row[amountOffset]);
+      if (amount === null) {
+        continue;
+      }
+      let jsDate: Date;
+      if (typeof dateCell === "object" && dateCell !== null && "getTime" in (dateCell as object)) {
+        jsDate = new Date((dateCell as Date).getTime());
+      } else if (typeof dateCell === "string" || typeof dateCell === "number") {
+        jsDate = new Date(dateCell);
+      } else {
+        continue;
+      }
+      if (Number.isNaN(jsDate.getTime())) {
+        continue;
+      }
+      const monthKey = `${jsDate.getUTCFullYear()}-${jsDate.getUTCMonth() + 1}`;
+      const quarterKey = `${jsDate.getUTCFullYear()}-Q${Math.floor(jsDate.getUTCMonth() / 3) + 1}`;
+      const yearKey = jsDate.getUTCFullYear();
+
+      monthTotals.set(monthKey, (monthTotals.get(monthKey) ?? 0) + amount);
+      quarterTotals.set(quarterKey, (quarterTotals.get(quarterKey) ?? 0) + amount);
+      yearTotals.set(yearKey, (yearTotals.get(yearKey) ?? 0) + amount);
+
+      if (!latestDate || jsDate > latestDate) {
+        latestDate = jsDate;
+      }
+    }
+
+    if (!latestDate) {
+      throw new Error("Výběr neobsahuje platná data pro porovnání.");
+    }
+
+    const toMonthKey = (date: Date) => `${date.getUTCFullYear()}-${date.getUTCMonth() + 1}`;
+    const toQuarterKey = (date: Date) => `${date.getUTCFullYear()}-Q${Math.floor(date.getUTCMonth() / 3) + 1}`;
+
+    const currentMonthKey = toMonthKey(latestDate);
+    const prevMonthDate = new Date(Date.UTC(latestDate.getUTCFullYear(), latestDate.getUTCMonth() - 1, 1));
+    const prevMonthKey = toMonthKey(prevMonthDate);
+
+    const currentQuarterKey = toQuarterKey(latestDate);
+    const prevQuarterDate = new Date(Date.UTC(latestDate.getUTCFullYear(), latestDate.getUTCMonth() - 3, 1));
+    const prevQuarterKey = toQuarterKey(prevQuarterDate);
+
+    const currentYear = latestDate.getUTCFullYear();
+    const prevYear = currentYear - 1;
+
+    currentTotals.month = monthTotals.get(currentMonthKey) ?? 0;
+    currentTotals.prevMonth = monthTotals.get(prevMonthKey) ?? 0;
+    currentTotals.quarter = quarterTotals.get(currentQuarterKey) ?? 0;
+    currentTotals.prevQuarter = quarterTotals.get(prevQuarterKey) ?? 0;
+    currentTotals.year = yearTotals.get(currentYear) ?? 0;
+    currentTotals.prevYear = yearTotals.get(prevYear) ?? 0;
+
+    const calcDelta = (current: number, previous: number) => ({
+      abs: current - previous,
+      pct: previous === 0 ? null : (current - previous) / previous
+    });
+
+    const monthDelta = calcDelta(currentTotals.month, currentTotals.prevMonth);
+    const quarterDelta = calcDelta(currentTotals.quarter, currentTotals.prevQuarter);
+    const yearDelta = calcDelta(currentTotals.year, currentTotals.prevYear);
+
+    const workbook = context.workbook;
+    let outputSheet = workbook.worksheets.getItemOrNullObject("_PeriodCompare");
+    await context.sync();
+    if (outputSheet.isNullObject) {
+      outputSheet = workbook.worksheets.add("_PeriodCompare");
+    }
+
+    const usedRange = outputSheet.getUsedRangeOrNullObject();
+    await context.sync();
+    if (!usedRange.isNullObject) {
+      usedRange.clear();
+    }
+
+    const summaryRows = [
+      ["Období", "Aktuální", "Předchozí", "Δ absolutní", "Δ %"],
+      [
+        "Měsíc",
+        currentTotals.month,
+        currentTotals.prevMonth,
+        monthDelta.abs,
+        monthDelta.pct
+      ],
+      [
+        "Čtvrtletí",
+        currentTotals.quarter,
+        currentTotals.prevQuarter,
+        quarterDelta.abs,
+        quarterDelta.pct
+      ],
+      [
+        "Rok",
+        currentTotals.year,
+        currentTotals.prevYear,
+        yearDelta.abs,
+        yearDelta.pct
+      ]
+    ];
+
+    const outputRange = outputSheet.getRangeByIndexes(0, 0, summaryRows.length, summaryRows[0]!.length);
+    const undoSnapshot = await captureUndoSnapshot(context, {
+      sheetName: outputSheet.name,
+      rowIndex: 0,
+      columnIndex: 0,
+      rowCount: summaryRows.length,
+      columnCount: summaryRows[0]!.length,
+      note: "Period comparison"
+    });
+
+    outputRange.values = summaryRows.map((row) =>
+      row.map((value) => (typeof value === "number" && Number.isFinite(value) ? value : value ?? ""))
+    );
+
+    const valueRange = outputRange.getOffsetRange(1, 1).getResizedRange(summaryRows.length - 2, 2);
+    valueRange.numberFormat = Array.from({ length: valueRange.rowCount }, () => [CZK_NUMBER_FORMAT, CZK_NUMBER_FORMAT]);
+
+    const percentRange = outputRange.getOffsetRange(1, 4).getResizedRange(summaryRows.length - 2, 1);
+    percentRange.numberFormat = Array.from({ length: percentRange.rowCount }, () => ["0.00%"]);
+
+    await recordAuditEntry(context, {
+      intent: preview.intent.type,
+      args: {
+        monthCurrent: currentTotals.month,
+        monthPrevious: currentTotals.prevMonth,
+        quarterCurrent: currentTotals.quarter,
+        quarterPrevious: currentTotals.prevQuarter,
+        yearCurrent: currentTotals.year,
+        yearPrevious: currentTotals.prevYear,
+        columns: {
+          amount: payload.amountColumnLetter,
+          date: payload.dateColumnLetter
+        }
+      },
+      rangeAddress: outputRange.address,
+      note: "Period comparison"
+    });
+    await recordTelemetryEvent(context, {
+      event: "apply",
+      intent: preview.intent.type
+    });
+    await context.sync();
+
+    return {
+      worksheetName: outputSheet.name,
+      snapshot: undoSnapshot
+    };
+  });
+
+  const warnings = result.snapshot.persisted
+    ? undefined
+    : ["Operace příliš velká pro trvalé Zpět; aktuální stav lze vrátit jen pomocí poslední akce Zpět."];
+
+  return {
+    message: `Porovnání období připraveno na listu ${result.worksheetName}.`,
+    warnings
+  };
+}
+
 async function applyFetchCnbRate(
   preview: IntentPreview<FetchCnbRateApplyPayload>
 ): Promise<ApplyResult> {
@@ -890,6 +1092,8 @@ export async function applyIntent(preview: IntentPreview): Promise<ApplyResult> 
       return applySumColumn(preview as IntentPreview<SumColumnApplyPayload>);
     case IntentType.MonthlyRunRate:
       return applyMonthlyRunRate(preview as IntentPreview<MonthlyRunRateApplyPayload>);
+    case IntentType.PeriodComparison:
+      return applyPeriodComparison(preview as IntentPreview<PeriodComparisonApplyPayload>);
     case IntentType.FetchCnbRate:
       return applyFetchCnbRate(preview as IntentPreview<FetchCnbRateApplyPayload>);
     case IntentType.FxConvertCnb:

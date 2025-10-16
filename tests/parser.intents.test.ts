@@ -96,4 +96,17 @@ describe("parseCzechRequest finance intents", () => {
       expect(outcome.intent.months).toBe(3);
     }
   });
+
+  it("detects period comparison intent", () => {
+    const outcome = parseCzechRequest("Meziroční a meziměsíční změna pro B (částka) podle A (datum)");
+    expect(outcome).not.toBeNull();
+    if (!outcome) {
+      return;
+    }
+    expect(outcome.intent.type).toBe(IntentType.PeriodComparison);
+    if (outcome.intent.type === IntentType.PeriodComparison) {
+      expect(outcome.intent.amountColumn).toBe("B");
+      expect(outcome.intent.dateColumn).toBe("A");
+    }
+  });
 });

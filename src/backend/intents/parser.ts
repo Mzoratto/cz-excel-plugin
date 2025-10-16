@@ -10,6 +10,7 @@ import {
   HighlightNegativeIntent,
   SumColumnIntent,
   MonthlyRunRateIntent,
+  PeriodComparisonIntent,
   SeedHolidaysIntent,
   NetworkdaysDueIntent
 } from "./types";
@@ -36,7 +37,8 @@ const SORT_KEYWORDS = ["serad", "seřaď", "sort", "seřadit", "usporadej", "usp
 const SORT_ASC_KEYWORDS = ["vzestup", "ascending", "nahoru", "vzestupne", "vzestupně"];
 const SORT_DESC_KEYWORDS = ["sestup", "descending", "dolu", "dolů", "sestupne", "sestupně"];
 const VAT_REMOVE_KEYWORDS = ["bez dph", "odeber dph", "odstran dph", "reverse charge", "vycisti dph", "bez dane"];
-const RUNRATE_KEYWORDS = ["run-rate", "runrate", "run rate", "runrate", "run rate" ];
+const RUNRATE_KEYWORDS = ["run-rate", "runrate", "run rate"];
+const PERIOD_COMPARISON_KEYWORDS = ["mezimesic", "meziměs", "mom", "qoq", "yoy", "meziroční", "meziměsíční", "čtvrtletní", "quarter", "year over year"];
 const HIGHLIGHT_NEGATIVE_KEYWORDS = ["zvyrazni zaporna", "zvýrazni záporná", "highlight negative", "zvyrazni minus", "obarvi zaporne"];
 const SUM_KEYWORDS = ["součet", "soucet", "sumuj", "sum", "souhrn", "total"];
 
@@ -161,6 +163,25 @@ function detectMonthlyRunRateIntent(originalText: string, normalized: string): M
     months,
     originalText,
     confidence: amountColumn && dateColumn ? 0.9 : 0.6
+  };
+}
+
+function detectPeriodComparisonIntent(originalText: string, normalized: string): PeriodComparisonIntent | undefined {
+  const mentionsComparison = PERIOD_COMPARISON_KEYWORDS.some((keyword) => normalized.includes(keyword));
+  if (!mentionsComparison) {
+    return undefined;
+  }
+
+  const roles = extractColumnRoles(originalText);
+  const dateColumn = roles.find((entry) => /datum|date/.test(entry.label.toLowerCase()))?.letter;
+  const amountColumn = roles.find((entry) => /část|cast|cena|hodnot|amount|tržb|trzb/.test(entry.label.toLowerCase()))?.letter;
+
+  return {
+    type: IntentType.PeriodComparison,
+    amountColumn,
+    dateColumn,
+    originalText,
+    confidence: amountColumn && dateColumn ? 0.9 : 0.65
   };
 }
 
@@ -389,6 +410,7 @@ export function parseCzechRequest(text: string): ParsedIntentOutcome | null {
     detectHighlightNegativeIntent,
     detectSumIntent,
     detectMonthlyRunRateIntent,
+    detectPeriodComparisonIntent,
     detectFxConvertIntent,
     detectFetchCnbRateIntent,
     detectSeedHolidaysIntent,

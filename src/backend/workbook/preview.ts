@@ -24,6 +24,8 @@ import {
   SumColumnApplyPayload,
   MonthlyRunRateIntent,
   MonthlyRunRateApplyPayload,
+  PeriodComparisonIntent,
+  PeriodComparisonApplyPayload,
   SeedHolidaysIntent,
   SeedHolidaysApplyPayload,
   NetworkdaysDueIntent,
@@ -748,6 +750,82 @@ async function buildMonthlyRunRatePreview(
   });
 }
 
+async function buildPeriodComparisonPreview(
+  intent: PeriodComparisonIntent
+): Promise<PreviewResult<PeriodComparisonApplyPayload>> {
+  return Excel.run(async (context) => {
+    const selection = await captureSelection(context);
+    if ("error" in selection) {
+      return { error: selection.error };
+    }
+
+    const issues: string[] = [];
+
+    if (selection.columnCount < 2) {
+      issues.push("Vyber alespoň dva sloupce: datumy a hodnoty.");
+    }
+
+    const hasHeader = detectHeader(selection);
+    const dateLetter = intent.dateColumn ?? columnLetterFromIndex(selection.columnIndex);
+    const amountLetter =
+      intent.amountColumn ?? columnLetterFromIndex(selection.columnIndex + Math.min(1, selection.columnCount - 1));
+
+    const dateAbsolute = columnIndexFromLetter(dateLetter ?? "");
+    const amountAbsolute = columnIndexFromLetter(amountLetter ?? "");
+
+    if (dateAbsolute === null || amountAbsolute === null) {
+      issues.push("Nepodařilo se určit sloupce s daty a částkami.");
+    } else {
+      const dateOffset = dateAbsolute - selection.columnIndex;
+      const amountOffset = amountAbsolute - selection.columnIndex;
+      if (dateOffset < 0 || dateOffset >= selection.columnCount) {
+        issues.push(`Sloupec s daty (${dateLetter}) není součástí výběru.`);
+      }
+      if (amountOffset < 0 || amountOffset >= selection.columnCount) {
+        issues.push(`Sloupec s částkami (${amountLetter}) není součástí výběru.`);
+      }
+    }
+
+    if (issues.length > 0) {
+      return { error: "Nelze připravit porovnání období.", issues };
+    }
+
+    const planItems = [
+      `Spočítat součty pro aktuální měsíc (${amountLetter}), předchozí měsíc, aktuální a předchozí čtvrtletí a rok.`,
+      "Zapsat tabulku s absolutními a procentními změnami do listu _PeriodCompare.",
+      "Výsledky formátovat v CZK a zapsat auditní stopu."
+    ];
+
+    const sample: SampleTable = {
+      headers: ["Metoda", "Popis"],
+      rows: [
+        ["MoM", "Meziměsíční změna v % a CZK"],
+        ["QoQ", "Mezičtvrtletní změna"],
+        ["YoY", "Meziroční změna"]
+      ]
+    };
+
+    const applyPayload: PeriodComparisonApplyPayload = {
+      sheetName: selection.sheetName,
+      rowIndex: selection.rowIndex,
+      columnIndex: selection.columnIndex,
+      rowCount: selection.rowCount,
+      columnCount: selection.columnCount,
+      hasHeader,
+      amountColumnLetter: amountLetter!,
+      dateColumnLetter: dateLetter!
+    };
+
+    return {
+      intent,
+      issues: [],
+      planText: buildPlanList(planItems),
+      sample,
+      applyPayload
+    };
+  });
+}
+
 async function buildFetchCnbPreview(
   intent: FetchCnbRateIntent
 ): Promise<PreviewResult<FetchCnbRateApplyPayload>> {
@@ -969,6 +1047,8 @@ export async function buildPreview(intent: SupportedIntent): Promise<PreviewResu
       return buildSumColumnPreview(intent);
     case IntentType.MonthlyRunRate:
       return buildMonthlyRunRatePreview(intent);
+    case IntentType.PeriodComparison:
+      return buildPeriodComparisonPreview(intent);
     case IntentType.FetchCnbRate:
       return buildFetchCnbPreview(intent);
     case IntentType.FxConvertCnb:

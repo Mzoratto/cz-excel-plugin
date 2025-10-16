@@ -9,6 +9,7 @@ export enum IntentType {
   HighlightNegative = "sheet.highlight_negative",
   SumColumn = "sheet.sum_column",
   MonthlyRunRate = "analysis.monthly_runrate",
+  PeriodComparison = "analysis.period_comparison",
   SeedHolidays = "holidays.seed",
   NetworkdaysDue = "schedule.networkdays_due"
 }
@@ -80,6 +81,12 @@ export interface MonthlyRunRateIntent extends IntentBase {
   months: number;
 }
 
+export interface PeriodComparisonIntent extends IntentBase {
+  type: IntentType.PeriodComparison;
+  amountColumn?: string;
+  dateColumn?: string;
+}
+
 export interface SeedHolidaysIntent extends IntentBase {
   type: IntentType.SeedHolidays;
   year: number;
@@ -102,6 +109,7 @@ export type SupportedIntent =
   | HighlightNegativeIntent
   | SumColumnIntent
   | MonthlyRunRateIntent
+  | PeriodComparisonIntent
   | SeedHolidaysIntent
   | NetworkdaysDueIntent;
 
@@ -215,6 +223,17 @@ export interface MonthlyRunRateApplyPayload {
   months: number;
 }
 
+export interface PeriodComparisonApplyPayload {
+  sheetName: string;
+  rowIndex: number;
+  columnIndex: number;
+  rowCount: number;
+  columnCount: number;
+  hasHeader: boolean;
+  amountColumnLetter: string;
+  dateColumnLetter: string;
+}
+
 export type ApplyPayload =
   | VatAddApplyPayload
   | FormatCzkApplyPayload
@@ -226,6 +245,7 @@ export type ApplyPayload =
   | HighlightNegativeApplyPayload
   | SumColumnApplyPayload
   | MonthlyRunRateApplyPayload
+  | PeriodComparisonApplyPayload
   | SeedHolidaysApplyPayload
   | NetworkdaysDueApplyPayload;
 
