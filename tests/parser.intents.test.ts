@@ -82,4 +82,18 @@ describe("parseCzechRequest finance intents", () => {
       expect(outcome.intent.columnLetter).toBe("E");
     }
   });
+
+  it("detects monthly run-rate intent", () => {
+    const outcome = parseCzechRequest("Run-rate z posledních 3 měsíců podle B (částky) a A (datum)");
+    expect(outcome).not.toBeNull();
+    if (!outcome) {
+      return;
+    }
+    expect(outcome.intent.type).toBe(IntentType.MonthlyRunRate);
+    if (outcome.intent.type === IntentType.MonthlyRunRate) {
+      expect(outcome.intent.amountColumn).toBe("B");
+      expect(outcome.intent.dateColumn).toBe("A");
+      expect(outcome.intent.months).toBe(3);
+    }
+  });
 });

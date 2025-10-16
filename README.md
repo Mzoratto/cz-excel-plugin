@@ -51,7 +51,7 @@ V Excelu (Desktop/Web) sideload manifest: `manifest.xml`. Dev server běží na 
    - ✅ Náhled generuje plán + ukázkové hodnoty a hlásí problémy s výběrem.
    - ✅ Apply používá stejný plán (DPH zapisuje vedlejší sloupec, formát nastavuje měnu CZK).
    - ✅ Nově: `vat.remove` (výpočet základu bez DPH), `sheet.sort_column` (řazení vzestupně/sestupně) a `finance.dedupe`.
-   - ✅ Přidané `sheet.highlight_negative` (podmíněné formátování záporných hodnot) a `sheet.sum_column` (součet vybraného sloupce).
+   - ✅ Přidané `sheet.highlight_negative` (podmíněné formátování záporných hodnot), `sheet.sum_column` (součet vybraného sloupce) a `analysis.monthly_runrate` (run-rate z posledních N měsíců).
 2. **Undo & Audit vrstvy**
    - ✅ In-memory zásobník + perzistentní snapshoty (do 2 000 buněk) v `_UndoIndex` / `_UndoData`.
    - ✅ `Zpět` tlačítko vrací poslední akci; chyby a velké operace logují varování.

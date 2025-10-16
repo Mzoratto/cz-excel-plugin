@@ -9,6 +9,7 @@ import {
   VatRemoveIntent,
   HighlightNegativeIntent,
   SumColumnIntent,
+  MonthlyRunRateIntent,
   SeedHolidaysIntent,
   NetworkdaysDueIntent
 } from "./types";
@@ -35,6 +36,7 @@ const SORT_KEYWORDS = ["serad", "seřaď", "sort", "seřadit", "usporadej", "usp
 const SORT_ASC_KEYWORDS = ["vzestup", "ascending", "nahoru", "vzestupne", "vzestupně"];
 const SORT_DESC_KEYWORDS = ["sestup", "descending", "dolu", "dolů", "sestupne", "sestupně"];
 const VAT_REMOVE_KEYWORDS = ["bez dph", "odeber dph", "odstran dph", "reverse charge", "vycisti dph", "bez dane"];
+const RUNRATE_KEYWORDS = ["run-rate", "runrate", "run rate", "runrate", "run rate" ];
 const HIGHLIGHT_NEGATIVE_KEYWORDS = ["zvyrazni zaporna", "zvýrazni záporná", "highlight negative", "zvyrazni minus", "obarvi zaporne"];
 const SUM_KEYWORDS = ["součet", "soucet", "sumuj", "sum", "souhrn", "total"];
 
@@ -97,6 +99,16 @@ function extractColumnLetter(source: string): string | undefined {
   return letter.toUpperCase();
 }
 
+function extractColumnRoles(source: string): Array<{ letter: string; label: string }> {
+  const results: Array<{ letter: string; label: string }> = [];
+  const pattern = /([A-Z])\s*\(([^)]+)\)/g;
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(source.toUpperCase())) !== null) {
+    results.push({ letter: match[1]!, label: match[2]! });
+  }
+  return results;
+}
+
 function detectVatIntent(originalText: string, normalized: string): SupportedIntent | undefined {
   if (!/\b(dph|vat)\b/.test(normalized)) {
     return undefined;
@@ -126,6 +138,29 @@ function detectVatIntent(originalText: string, normalized: string): SupportedInt
     columnLetter,
     originalText,
     confidence: columnLetter ? 0.95 : 0.85
+  };
+}
+
+function detectMonthlyRunRateIntent(originalText: string, normalized: string): MonthlyRunRateIntent | undefined {
+  const mentionsRunRate = RUNRATE_KEYWORDS.some((keyword) => normalized.includes(keyword));
+  if (!mentionsRunRate) {
+    return undefined;
+  }
+
+  const monthsMatch = normalized.match(/(\d+)\s*(?:měsíc|mesic|m)/);
+  const months = monthsMatch ? Math.max(1, parseInt(monthsMatch[1]!, 10)) : 3;
+
+  const roles = extractColumnRoles(originalText);
+  const dateColumn = roles.find((entry) => /datum|date/.test(entry.label.toLowerCase()))?.letter;
+  const amountColumn = roles.find((entry) => /část|cast|cena|hodnot|amount|tržb|trzb/.test(entry.label.toLowerCase()))?.letter;
+
+  return {
+    type: IntentType.MonthlyRunRate,
+    amountColumn,
+    dateColumn,
+    months,
+    originalText,
+    confidence: amountColumn && dateColumn ? 0.9 : 0.6
   };
 }
 
@@ -353,6 +388,7 @@ export function parseCzechRequest(text: string): ParsedIntentOutcome | null {
     detectSortIntent,
     detectHighlightNegativeIntent,
     detectSumIntent,
+    detectMonthlyRunRateIntent,
     detectFxConvertIntent,
     detectFetchCnbRateIntent,
     detectSeedHolidaysIntent,

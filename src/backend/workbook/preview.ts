@@ -22,13 +22,15 @@ import {
   HighlightNegativeApplyPayload,
   SumColumnIntent,
   SumColumnApplyPayload,
+  MonthlyRunRateIntent,
+  MonthlyRunRateApplyPayload,
   SeedHolidaysIntent,
   SeedHolidaysApplyPayload,
   NetworkdaysDueIntent,
   NetworkdaysDueApplyPayload
 } from "../intents/types";
 import { parseCzechNumeric, formatCzk } from "../utils/numbers";
-import { buildPlanList, columnLetterFromIndex } from "../utils/excel";
+import { buildPlanList, columnLetterFromIndex, columnIndexFromLetter } from "../utils/excel";
 import { getCachedRate } from "./cnb";
 import { listCzechHolidays, loadHolidaySet, calculateBusinessDueDate } from "./holidays";
 import { formatISODate } from "../utils/date";
@@ -670,6 +672,82 @@ async function buildSumColumnPreview(intent: SumColumnIntent): Promise<PreviewRe
   });
 }
 
+async function buildMonthlyRunRatePreview(
+  intent: MonthlyRunRateIntent
+): Promise<PreviewResult<MonthlyRunRateApplyPayload>> {
+  return Excel.run(async (context) => {
+    const selection = await captureSelection(context);
+    if ("error" in selection) {
+      return { error: selection.error };
+    }
+
+    const issues: string[] = [];
+
+    if (selection.columnCount < 2) {
+      issues.push("Vyber alespoň dva sloupce: datumy a částky.");
+    }
+
+    const hasHeader = detectHeader(selection);
+
+    const dateLetter = intent.dateColumn ?? columnLetterFromIndex(selection.columnIndex);
+    const amountLetter =
+      intent.amountColumn ?? columnLetterFromIndex(selection.columnIndex + Math.min(1, selection.columnCount - 1));
+
+    const dateAbsolute = columnIndexFromLetter(dateLetter ?? "");
+    const amountAbsolute = columnIndexFromLetter(amountLetter ?? "");
+
+    if (dateAbsolute === null || amountAbsolute === null) {
+      issues.push("Nepodařilo se určit, které sloupce obsahují datum a částku.");
+    } else {
+      const dateOffset = dateAbsolute - selection.columnIndex;
+      const amountOffset = amountAbsolute - selection.columnIndex;
+      if (dateOffset < 0 || dateOffset >= selection.columnCount) {
+        issues.push(`Sloupec s daty (${dateLetter}) není součástí výběru.`);
+      }
+      if (amountOffset < 0 || amountOffset >= selection.columnCount) {
+        issues.push(`Sloupec s částkami (${amountLetter}) není součástí výběru.`);
+      }
+    }
+
+    if (issues.length > 0) {
+      return { error: "Nelze připravit run-rate náhled.", issues };
+    }
+
+    const months = intent.months ?? 3;
+
+    const planItems = [
+      `Vzít data ve sloupci ${amountLetter} a seřadit je podle měsíců z ${dateLetter}.`,
+      `Spočítat průměr za posledních ${months} měsíců a annualizovat ×12.`,
+      "Výsledky zapsat do listu _RunRate včetně poznámky a auditního záznamu."
+    ];
+
+    const sample: SampleTable = {
+      headers: ["Výstup"],
+      rows: [[`Roční run-rate na základě ${months} měsíců.`]]
+    };
+
+    const applyPayload: MonthlyRunRateApplyPayload = {
+      sheetName: selection.sheetName,
+      rowIndex: selection.rowIndex,
+      columnIndex: selection.columnIndex,
+      rowCount: selection.rowCount,
+      columnCount: selection.columnCount,
+      hasHeader,
+      amountColumnLetter: amountLetter!,
+      dateColumnLetter: dateLetter!,
+      months
+    };
+
+    return {
+      intent,
+      issues: [],
+      planText: buildPlanList(planItems),
+      sample,
+      applyPayload
+    };
+  });
+}
+
 async function buildFetchCnbPreview(
   intent: FetchCnbRateIntent
 ): Promise<PreviewResult<FetchCnbRateApplyPayload>> {
@@ -889,6 +967,8 @@ export async function buildPreview(intent: SupportedIntent): Promise<PreviewResu
       return buildHighlightNegativePreview(intent);
     case IntentType.SumColumn:
       return buildSumColumnPreview(intent);
+    case IntentType.MonthlyRunRate:
+      return buildMonthlyRunRatePreview(intent);
     case IntentType.FetchCnbRate:
       return buildFetchCnbPreview(intent);
     case IntentType.FxConvertCnb:

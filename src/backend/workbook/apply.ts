@@ -11,16 +11,18 @@ import {
   VatRemoveApplyPayload,
   HighlightNegativeApplyPayload,
   SumColumnApplyPayload,
+  MonthlyRunRateApplyPayload,
   SeedHolidaysApplyPayload,
   NetworkdaysDueApplyPayload
 } from "../intents/types";
-import { columnLetterFromIndex } from "../utils/excel";
+import { columnLetterFromIndex, columnIndexFromLetter } from "../utils/excel";
 import { captureUndoSnapshot } from "./undo";
 import { recordAuditEntry } from "./audit";
 import { ensureCnbRate } from "./cnb";
 import { seedCzechHolidays, loadHolidaySet, calculateBusinessDueDate } from "./holidays";
 import { recordTelemetryEvent } from "./telemetry";
 import { formatISODate } from "../utils/date";
+import { parseCzechNumeric } from "../utils/numbers";
 
 const CZK_NUMBER_FORMAT = '[$-cs-CZ]#,##0.00 "Kč"';
 const RATE_FORMATTER = new Intl.NumberFormat("cs-CZ", {
@@ -461,6 +463,164 @@ async function applySumColumn(preview: IntentPreview<SumColumnApplyPayload>): Pr
   };
 }
 
+async function applyMonthlyRunRate(preview: IntentPreview<MonthlyRunRateApplyPayload>): Promise<ApplyResult> {
+  const payload = preview.applyPayload;
+  const amountAbsolute = columnIndexFromLetter(payload.amountColumnLetter);
+  const dateAbsolute = columnIndexFromLetter(payload.dateColumnLetter);
+  if (amountAbsolute === null || dateAbsolute === null) {
+    throw new Error("Nelze určit sloupce pro výpočet run-rate.");
+  }
+
+  const { worksheetName, snapshot } = await Excel.run(async (context) => {
+      const sheet = context.workbook.worksheets.getItem(payload.sheetName);
+      const range = sheet.getRangeByIndexes(payload.rowIndex, payload.columnIndex, payload.rowCount, payload.columnCount);
+      range.load("values");
+      await context.sync();
+
+      const data = range.values as (string | number | boolean)[][];
+      const dataStart = payload.hasHeader ? 1 : 0;
+      const amountOffset = amountAbsolute - payload.columnIndex;
+      const dateOffset = dateAbsolute - payload.columnIndex;
+
+      if (amountOffset < 0 || amountOffset >= payload.columnCount || dateOffset < 0 || dateOffset >= payload.columnCount) {
+        throw new Error("Výběr neobsahuje očekávané sloupce pro run-rate.");
+      }
+
+      const monthBuckets = new Map<string, { total: number; label: string }>();
+      let latestDate: Date | null = null;
+
+      for (let i = dataStart; i < data.length; i += 1) {
+        const row = data[i];
+        if (!row) {
+          continue;
+        }
+        const dateCell = row[dateOffset];
+        const amount = parseCzechNumeric(row[amountOffset]);
+        if (amount === null) {
+          continue;
+        }
+        let jsDate: Date;
+        if (typeof dateCell === "object" && dateCell !== null && "getTime" in (dateCell as object)) {
+          jsDate = new Date((dateCell as Date).getTime());
+        } else if (typeof dateCell === "string" || typeof dateCell === "number") {
+          jsDate = new Date(dateCell);
+        } else {
+          continue;
+        }
+        if (Number.isNaN(jsDate.getTime())) {
+          continue;
+        }
+        const key = `${jsDate.getUTCFullYear()}-${jsDate.getUTCMonth() + 1}`;
+        const label = `${jsDate.getUTCFullYear()}-${String(jsDate.getUTCMonth() + 1).padStart(2, "0")}`;
+        const bucket = monthBuckets.get(key) ?? { total: 0, label };
+        bucket.total += amount;
+        monthBuckets.set(key, bucket);
+        if (!latestDate || jsDate > latestDate) {
+          latestDate = jsDate;
+        }
+      }
+
+      if (monthBuckets.size === 0) {
+        throw new Error("Ve vybraném rozsahu chybí numerická data nebo datum.");
+      }
+
+      const sortedKeys = Array.from(monthBuckets.keys()).sort((a, b) => {
+        const [ay, am] = a.split("-").map(Number);
+        const [by, bm] = b.split("-").map(Number);
+        return ay === by ? am - bm : ay - by;
+      });
+
+      const windowSize = payload.months;
+      const windowKeys = sortedKeys.slice(-windowSize);
+      const monthlyTotals = windowKeys.map((key) => monthBuckets.get(key)!);
+      const sumTotals = monthlyTotals.reduce((acc, item) => acc + item.total, 0);
+      const average = sumTotals / (windowKeys.length || 1);
+      const annualizedValue = average * 12;
+
+      const workbook = context.workbook;
+      let outputSheet = workbook.worksheets.getItemOrNullObject("_RunRate");
+      await context.sync();
+      if (outputSheet.isNullObject) {
+        outputSheet = workbook.worksheets.add("_RunRate");
+      }
+
+      const usedRange = outputSheet.getUsedRangeOrNullObject();
+      usedRange.load("address");
+      await context.sync();
+      if (!usedRange.isNullObject) {
+        usedRange.clear();
+      }
+
+      const summaryRows = [
+        ["Období", `${windowKeys.length} měsíců`],
+        ["Součet za období", sumTotals],
+        ["Průměr měsíčně", average],
+        ["Roční run-rate", annualizedValue],
+        [
+          "Poznámka",
+          latestDate
+            ? `Data k ${latestDate.toLocaleDateString("cs-CZ")} z ${payload.sheetName}!${payload.amountColumnLetter}`
+            : `Data z listu ${payload.sheetName}`
+        ]
+      ];
+
+      const outputRange = outputSheet.getRangeByIndexes(0, 0, summaryRows.length, 2);
+      const undoSnapshot = await captureUndoSnapshot(context, {
+        sheetName: outputSheet.name,
+        rowIndex: 0,
+        columnIndex: 0,
+        rowCount: Math.max(summaryRows.length, monthlyTotals.length + 2),
+        columnCount: 3,
+        note: "Monthly run-rate"
+      });
+
+      outputRange.values = summaryRows;
+      const currencyRows = outputSheet.getRangeByIndexes(1, 1, 3, 1);
+      currencyRows.numberFormat = [[CZK_NUMBER_FORMAT], [CZK_NUMBER_FORMAT], [CZK_NUMBER_FORMAT]];
+
+      if (monthlyTotals.length > 0) {
+        const detailRange = outputSheet.getRangeByIndexes(summaryRows.length + 1, 0, monthlyTotals.length + 1, 2);
+        const detailValues: (string | number)[][] = [["Měsíc", "Součet"], ...monthlyTotals.map((item) => [item.label, item.total])];
+        detailRange.values = detailValues;
+        if (monthlyTotals.length > 0) {
+          const detailValuesRange = outputSheet
+            .getRangeByIndexes(summaryRows.length + 2, 1, monthlyTotals.length, 1);
+          detailValuesRange.numberFormat = Array.from({ length: monthlyTotals.length }, () => [CZK_NUMBER_FORMAT]);
+        }
+      }
+
+      await recordAuditEntry(context, {
+        intent: preview.intent.type,
+        args: {
+          months: windowKeys.length,
+          amountColumn: payload.amountColumnLetter,
+          dateColumn: payload.dateColumnLetter
+        },
+        rangeAddress: outputRange.address,
+        note: "Run-rate summary"
+      });
+      await recordTelemetryEvent(context, {
+        event: "apply",
+        intent: preview.intent.type
+      });
+      await context.sync();
+
+      return {
+        worksheetName: outputSheet.name,
+        snapshot: undoSnapshot
+      };
+    });
+
+  const warnings = snapshot.persisted
+    ? undefined
+    : ["Operace příliš velká pro trvalé Zpět; aktuální stav lze vrátit jen pomocí poslední akce Zpět."];
+
+  return {
+    message: `Run-rate připraven na listu ${worksheetName}.`,
+    warnings
+  };
+}
+
 async function applyFetchCnbRate(
   preview: IntentPreview<FetchCnbRateApplyPayload>
 ): Promise<ApplyResult> {
@@ -728,6 +888,8 @@ export async function applyIntent(preview: IntentPreview): Promise<ApplyResult> 
       return applyHighlightNegative(preview as IntentPreview<HighlightNegativeApplyPayload>);
     case IntentType.SumColumn:
       return applySumColumn(preview as IntentPreview<SumColumnApplyPayload>);
+    case IntentType.MonthlyRunRate:
+      return applyMonthlyRunRate(preview as IntentPreview<MonthlyRunRateApplyPayload>);
     case IntentType.FetchCnbRate:
       return applyFetchCnbRate(preview as IntentPreview<FetchCnbRateApplyPayload>);
     case IntentType.FxConvertCnb:
