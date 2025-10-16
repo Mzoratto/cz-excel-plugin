@@ -42,10 +42,85 @@ body {
   box-shadow: inset 0 0 0 1px rgba(27, 29, 33, 0.05);
 }
 
+.pane__section--chat {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 220px;
+}
+
 .pane__section-title {
   margin: 0 0 8px;
   font-size: 14px;
   color: #1b1d21;
+}
+
+.chat-thread {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  overflow-y: auto;
+  padding-right: 4px;
+  max-height: 320px;
+}
+
+.chat-thread__placeholder {
+  margin: 0;
+  color: #6d6f76;
+  font-size: 13px;
+}
+
+.chat-message {
+  display: inline-flex;
+  flex-direction: column;
+  max-width: 88%;
+  padding: 10px 12px;
+  border-radius: 12px;
+  box-shadow: 0 1px 2px rgba(27, 29, 33, 0.12);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.chat-message__content {
+  white-space: pre-wrap;
+}
+
+.chat-message__meta {
+  margin-top: 6px;
+  font-size: 11px;
+  color: rgba(27, 29, 33, 0.55);
+  text-align: right;
+}
+
+.chat-message--user {
+  align-self: flex-end;
+  background-color: #1856f2;
+  color: #ffffff;
+}
+
+.chat-message--assistant {
+  align-self: flex-start;
+  background-color: #eef3ff;
+  color: #1b1d21;
+}
+
+.chat-message--action {
+  align-self: flex-start;
+  background-color: #e6f6ee;
+  color: #0b5d34;
+}
+
+.chat-message--system {
+  align-self: center;
+  background-color: #fff3cd;
+  color: #6d5200;
+}
+
+.chat-message--error {
+  align-self: flex-start;
+  background-color: #fdecea;
+  color: #7f1c1c;
 }
 
 .pane__form {
@@ -61,7 +136,7 @@ body {
 
 .pane__textarea {
   resize: vertical;
-  min-height: 80px;
+  min-height: 72px;
   border-radius: 6px;
   border: 1px solid rgba(27, 29, 33, 0.2);
   padding: 8px;
@@ -126,9 +201,8 @@ body {
   color: #1b1d21;
 }
 
-.preview-pane,
-.log-pane {
-  min-height: 100px;
+.plan-pane {
+  min-height: 120px;
   border-radius: 6px;
   border: 1px dashed rgba(27, 29, 33, 0.25);
   padding: 12px;
@@ -137,8 +211,7 @@ body {
   color: #3a3d45;
 }
 
-.preview-pane__placeholder,
-.log-pane__placeholder {
+.plan-pane__placeholder {
   margin: 0;
   color: #6d6f76;
 }
@@ -190,29 +263,4 @@ body {
 .alert ul {
   margin: 6px 0 0;
   padding-left: 16px;
-}
-
-.log-entry {
-  display: flex;
-  gap: 6px;
-  font-size: 12px;
-  padding: 6px 0;
-  border-bottom: 1px solid rgba(27, 29, 33, 0.08);
-}
-
-.log-entry:last-child {
-  border-bottom: none;
-}
-
-.log-entry--error {
-  color: #6d0000;
-}
-
-.log-entry__time {
-  min-width: 64px;
-  color: #6d6f76;
-}
-
-.log-entry__message {
-  flex: 1;
 }

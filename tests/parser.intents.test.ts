@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { parseCzechRequest } from "../src/intents/parser";
-import { IntentType } from "../src/intents/types";
+import { parseCzechRequest } from "../src/backend/intents/parser";
+import { IntentType } from "../src/backend/intents/types";
 
 describe("parseCzechRequest finance intents", () => {
   it("recognizes add_vat phrasing as VAT intent", () => {

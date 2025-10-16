@@ -1,5 +1,5 @@
 import { renderApp } from "./ui/renderApp";
-import { ensureWorkbookArtifacts } from "./workbook/artifacts";
+import { ensureWorkbookArtifacts } from "../backend/workbook/artifacts";
 import "./ui/styles.css";
 
 Office.onReady(async (info) => {

@@ -1,4 +1,5 @@
-import { handleApplyRequest, handlePreviewRequest, handleUndoRequest } from "../core/controller";
+import { handleApplyRequest, handleUndoRequest, handleUserRequest } from "../core/controller";
+import { clearPlan } from "./state";
 
 const QUICK_ACTIONS = [
   { label: "DPH 21 %", prompt: "Přidej DPH 21 % do sloupce C" },
@@ -21,30 +22,44 @@ function bindQuickActions(input: HTMLTextAreaElement) {
 
 function bindFormHandlers(input: HTMLTextAreaElement) {
   const form = document.querySelector<HTMLFormElement>("[data-role='request-form']");
-  const previewButton = document.querySelector<HTMLButtonElement>("[data-role='preview']");
+  const sendButton = document.querySelector<HTMLButtonElement>("[data-role='send']");
   const applyButton = document.querySelector<HTMLButtonElement>("[data-role='apply']");
   const undoButton = document.querySelector<HTMLButtonElement>("[data-role='undo']");
 
-  if (!form || !previewButton || !applyButton || !undoButton) {
+  if (!form || !sendButton || !applyButton || !undoButton) {
     return;
   }
 
+  const submitHandler = async () => {
+    const request = input.value;
+    input.value = "";
+    await handleUserRequest(request);
+    input.focus();
+  };
+
   form.addEventListener("submit", (event) => {
     event.preventDefault();
-    previewButton.click();
+    submitHandler().catch((error) => {
+      console.error("Chat handling failed", error);
+    });
   });
 
-  previewButton.addEventListener("click", async () => {
-    const request = input.value;
-    await handlePreviewRequest(request);
+  sendButton.addEventListener("click", () => {
+    submitHandler().catch((error) => {
+      console.error("Chat handling failed", error);
+    });
   });
 
-  applyButton.addEventListener("click", async () => {
-    await handleApplyRequest();
+  applyButton.addEventListener("click", () => {
+    handleApplyRequest().catch((error) => {
+      console.error("Apply failed", error);
+    });
   });
 
   undoButton.addEventListener("click", () => {
-    handleUndoRequest();
+    handleUndoRequest().catch((error) => {
+      console.error("Undo failed", error);
+    });
   });
 }
 
@@ -63,32 +78,31 @@ export function renderApp() {
     <div class="pane">
       <header class="pane__header">
         <h1 class="pane__title">CZ Excel Copilot</h1>
-        <p class="pane__subtitle">Zadej pokyn v češtině, zobraz náhled a aplikuj změny bezpečně.</p>
+        <p class="pane__subtitle">Chatbot, který rozumí českým finančním požadavkům v Excelu.</p>
       </header>
+      <section class="pane__section pane__section--chat">
+        <div id="chat-thread" class="chat-thread">
+          <p class="chat-thread__placeholder">Zeptej se například: „Přidej DPH 21 % do sloupce C“.</p>
+        </div>
+      </section>
       <section class="pane__section">
         <form data-role="request-form" class="pane__form">
           <label for="request-input" class="pane__label">Tvůj požadavek</label>
-          <textarea id="request-input" class="pane__textarea" rows="4" placeholder="Např. Přidej DPH 21 % do sloupce C"></textarea>
+          <textarea id="request-input" class="pane__textarea" rows="3" placeholder="Např. Přepočítej USD na CZK k 5.1.2024"></textarea>
           <div class="pane__chips">
             ${quickActionsMarkup}
           </div>
           <div class="pane__actions">
-            <button type="button" data-role="preview" class="button button--primary">Náhled</button>
-            <button type="button" data-role="apply" class="button button--accent" disabled>Provést</button>
+            <button type="button" data-role="send" class="button button--primary">Odeslat</button>
+            <button type="button" data-role="apply" class="button button--accent" disabled>Provést plán</button>
             <button type="button" data-role="undo" class="button button--ghost">Zpět</button>
           </div>
         </form>
       </section>
       <section class="pane__section">
-        <h2 class="pane__section-title">Náhled</h2>
-        <div id="preview-pane" class="preview-pane">
-          <p class="preview-pane__placeholder">Ve vývoji: zde se zobrazí plán a vzorová data.</p>
-        </div>
-      </section>
-      <section class="pane__section">
-        <h2 class="pane__section-title">Log</h2>
-        <div id="log-pane" class="log-pane">
-          <p class="log-pane__placeholder">Log akcí bude čitelný i v listu _Audit.</p>
+        <h2 class="pane__section-title">Plán</h2>
+        <div id="plan-pane" class="plan-pane">
+          <p class="plan-pane__placeholder">Plán se zobrazí po rozpoznání konkrétní akce.</p>
         </div>
       </section>
     </div>
@@ -101,4 +115,6 @@ export function renderApp() {
 
   bindQuickActions(input);
   bindFormHandlers(input);
+  clearPlan();
+  input.focus();
 }

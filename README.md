@@ -6,11 +6,12 @@ Offline-first český chatbot/copilot panel pro Excel. Add-in čte přirozené p
 
 - `manifest.xml` – manifest pro sideload add-inu (`https://localhost:5173/taskpane.html`).
 - `taskpane.html` – HTML vstup Vite dev serveru.
-- `src/main.ts` – bootstrap Office.js + UI + provisioning skrytých listů.
-- `src/ui/*` – jednoduché UI v TypeScriptu a CSS.
-- `src/workbook/artifacts.ts` – zajišťuje vytvoření listů `_Audit`, `_UndoIndex`, `_UndoData`, `_FX_CNB`, `_HOLIDAYS_CZ`, `_Settings`.
-- `src/workbook/cnb.ts` – cache ČNB kurzů s fallbackem na API.
-- `src/workbook/holidays.ts` – generování českých svátků + výpočty pracovních dní.
+- `src/frontend` – Office.js bootstrap (`main.ts`), chat UI, ovládání tlačítek a stylování.
+- `src/backend` – deterministické intent služby, Excel workbook operace, chat orchestrátor a fallbacky na MCP/LLM.
+- `src/backend/workbook/artifacts.ts` – zajišťuje vytvoření listů `_Audit`, `_UndoIndex`, `_UndoData`, `_FX_CNB`, `_HOLIDAYS_CZ`, `_Settings`.
+- `src/backend/workbook/cnb.ts` – cache ČNB kurzů s fallbackem na API.
+- `src/backend/workbook/holidays.ts` – generování českých svátků + výpočty pracovních dní.
+- `docs/` – instrukce pro různé agenty (Codex, Claude, atd.).
 - `public/assets` – dočasné ikonky pro manifest (nahraď vlastní grafikou).
 
 ## Lokální běh
@@ -28,6 +29,13 @@ V Excelu (Desktop/Web) sideload manifest: `manifest.xml`. Dev server běží na 
 - CI workflow `ci.yml` běží na každý push/PR a ukládá artefakt `cz-excel-copilot.zip` s aktuálním balíčkem.
 - Push tagu ve formátu `v*` (nebo ruční spuštění `Release` workflow) vyrobí produkční build, vytvoří GitHub Release a připojí ZIP. Release notes jsou generovány automaticky.
 - V Excelu lze ZIP rozbalit a `manifest.xml` sideloadovat; složka `dist/` obsahuje hotová statická aktiva pro produkci.
+
+## Chat backend & Byterover MCP
+
+- Add-in nejprve zkouší deterministické intent-parsování; pokud výraz nelze rozpoznat, odešle historii do chat backendu (např. Byterover MCP).
+- Endpoint a token lze poskytnout přes globální proměnné `window.__BYTEROVER_CHAT_ENDPOINT__` a `window.__BYTEROVER_API_KEY__` (např. injektované skriptem nebo nastavené v host aplikaci).
+- Knihovna udržuje konverzační historii na straně klienta (`ChatSession`) a do UI zapisuje chat transcript.
+- Pokud je CLI/bytterover tooling k dispozici lokálně, používejte `byterover-retrieve-knowledge` a `byterover-store-knowledge` dle instrukcí v `docs/` pro průběžné učení asistenta.
 
 ## Další implementace (navazuje na PRD)
 
