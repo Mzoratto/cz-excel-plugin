@@ -1,0 +1,50 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Use Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Test
+        run: npm run test
+
+      - name: Build & package
+        run: npm run package
+
+      - name: Prepare release notes
+        run: |
+          echo "## Build Summary" > RELEASE_NOTES.md
+          echo "" >> RELEASE_NOTES.md
+          echo "- Build generated on $(date -u '+%Y-%m-%d %H:%M:%S UTC')." >> RELEASE_NOTES.md
+          echo "- Package includes manifest.xml and dist/ for sideloading the chatbot add-in." >> RELEASE_NOTES.md
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release/*.zip
+          body_path: RELEASE_NOTES.md
+          fail_on_unmatched_files: true

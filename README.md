@@ -1,6 +1,6 @@
 # CZ Excel Copilot Add-in
 
-Offline-first český copilota panel pro Excel, který připravuje půdu pro DPH, formátování CZK, preview/undo/audit a pozdější integrace s ČNB.
+Offline-first český chatbot/copilot panel pro Excel. Add-in čte přirozené požadavky (DPH, kurz ČNB, deduplikace, pracovní termíny), zobrazí plán v postranním panelu a po potvrzení provede změny v sešitu včetně undo/audit vrstvy.
 
 ## Struktura projektu
 
@@ -21,6 +21,13 @@ npm run dev
 ```
 
 V Excelu (Desktop/Web) sideload manifest: `manifest.xml`. Dev server běží na `https://localhost:5173`.
+
+## Automatizované releasy
+
+- `npm run package` spustí produkční build a zabalí `manifest.xml` + `dist/` do `release/cz-excel-copilot-<timestamp>.zip` – balíček připravený k nasazení nebo k nahrání do admin konzole.
+- CI workflow `ci.yml` běží na každý push/PR a ukládá artefakt `cz-excel-copilot.zip` s aktuálním balíčkem.
+- Push tagu ve formátu `v*` (nebo ruční spuštění `Release` workflow) vyrobí produkční build, vytvoří GitHub Release a připojí ZIP. Release notes jsou generovány automaticky.
+- V Excelu lze ZIP rozbalit a `manifest.xml` sideloadovat; složka `dist/` obsahuje hotová statická aktiva pro produkci.
 
 ## Další implementace (navazuje na PRD)
 

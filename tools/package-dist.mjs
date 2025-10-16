@@ -25,6 +25,13 @@ async function createArchive() {
   await ensureFileExists(manifestPath, "manifest.xml");
   await fsPromises.mkdir(releaseDir, { recursive: true });
 
+  const existingEntries = await fsPromises.readdir(releaseDir, { withFileTypes: true });
+  await Promise.all(
+    existingEntries
+      .filter((entry) => entry.isFile() && entry.name.endsWith(".zip"))
+      .map((entry) => fsPromises.unlink(path.join(releaseDir, entry.name)))
+  );
+
   const timestamp = formatTimestamp(new Date());
   const archiveName = `cz-excel-copilot-${timestamp}.zip`;
   const outputPath = path.join(releaseDir, archiveName);
