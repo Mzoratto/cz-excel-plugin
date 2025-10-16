@@ -24,5 +24,10 @@ declare namespace Excel {
       external?: boolean,
       relativeTo?: Excel.Range
     ): string;
+
+    /**
+     * Returns a Sort object for the range.
+     */
+    getSort(): Excel.Sort;
   }
 }

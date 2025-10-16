@@ -4,6 +4,8 @@ export enum IntentType {
   FetchCnbRate = "cnb.fetch_rate",
   FxConvertCnb = "cnb.fx_convert",
   FinanceDedupe = "finance.dedupe",
+  SortColumn = "sheet.sort_column",
+  VatRemove = "vat.remove",
   SeedHolidays = "holidays.seed",
   NetworkdaysDue = "schedule.networkdays_due"
 }
@@ -45,6 +47,19 @@ export interface FinanceDedupeIntent extends IntentBase {
   columnLetter?: string;
 }
 
+export interface SortColumnIntent extends IntentBase {
+  type: IntentType.SortColumn;
+  columnLetter?: string;
+  direction: "asc" | "desc";
+}
+
+export interface VatRemoveIntent extends IntentBase {
+  type: IntentType.VatRemove;
+  rate: number;
+  rateLabel: string;
+  columnLetter?: string;
+}
+
 export interface SeedHolidaysIntent extends IntentBase {
   type: IntentType.SeedHolidays;
   year: number;
@@ -62,6 +77,8 @@ export type SupportedIntent =
   | FetchCnbRateIntent
   | FxConvertCnbIntent
   | FinanceDedupeIntent
+  | SortColumnIntent
+  | VatRemoveIntent
   | SeedHolidaysIntent
   | NetworkdaysDueIntent;
 
@@ -127,12 +144,34 @@ export interface FinanceDedupeApplyPayload {
   hasHeader: boolean;
 }
 
+export interface SortColumnApplyPayload {
+  sheetName: string;
+  rowIndex: number;
+  columnIndex: number;
+  rowCount: number;
+  columnCount: number;
+  hasHeader: boolean;
+  ascending: boolean;
+}
+
+export interface VatRemoveApplyPayload {
+  sheetName: string;
+  rowIndex: number;
+  columnIndex: number;
+  rowCount: number;
+  hasHeader: boolean;
+  rate: number;
+  rateLabel: string;
+}
+
 export type ApplyPayload =
   | VatAddApplyPayload
   | FormatCzkApplyPayload
   | FetchCnbRateApplyPayload
   | FxConvertCnbApplyPayload
   | FinanceDedupeApplyPayload
+  | SortColumnApplyPayload
+  | VatRemoveApplyPayload
   | SeedHolidaysApplyPayload
   | NetworkdaysDueApplyPayload;
 

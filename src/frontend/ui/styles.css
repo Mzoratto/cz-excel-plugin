@@ -123,6 +123,11 @@ body {
   color: #7f1c1c;
 }
 
+.chat-message--typing {
+  opacity: 0.7;
+  font-style: italic;
+}
+
 .pane__form {
   display: flex;
   flex-direction: column;
@@ -214,6 +219,16 @@ body {
 .plan-pane__placeholder {
   margin: 0;
   color: #6d6f76;
+}
+
+.plan-actions {
+  margin-top: 12px;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.plan-actions .button {
+  font-size: 12px;
 }
 
 .preview-plan {

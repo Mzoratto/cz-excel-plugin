@@ -29,13 +29,20 @@ V Excelu (Desktop/Web) sideload manifest: `manifest.xml`. Dev server běží na 
 - CI workflow `ci.yml` běží na každý push/PR a ukládá artefakt `cz-excel-copilot.zip` s aktuálním balíčkem.
 - Push tagu ve formátu `v*` (nebo ruční spuštění `Release` workflow) vyrobí produkční build, vytvoří GitHub Release a připojí ZIP. Release notes jsou generovány automaticky.
 - V Excelu lze ZIP rozbalit a `manifest.xml` sideloadovat; složka `dist/` obsahuje hotová statická aktiva pro produkci.
+- `npm run manifest:build -- --host=https://cdn.example.com --output=release/manifest-prod.xml` vygeneruje manifest z šablony `manifest.template.xml` s URL pro produkční hostitele.
 
 ## Chat backend & Byterover MCP
 
 - Add-in nejprve zkouší deterministické intent-parsování; pokud výraz nelze rozpoznat, odešle historii do chat backendu (např. Byterover MCP).
 - Endpoint a token lze poskytnout přes globální proměnné `window.__BYTEROVER_CHAT_ENDPOINT__` a `window.__BYTEROVER_API_KEY__` (např. injektované skriptem nebo nastavené v host aplikaci).
+- Backend posílá LLM systémovou instrukci; pokud vrátíš JSON s `reply` + `follow_up_intent`, parser automaticky připraví plán a zobrazí ho v sekci **Plán**.
 - Knihovna udržuje konverzační historii na straně klienta (`ChatSession`) a do UI zapisuje chat transcript.
 - Pokud je CLI/bytterover tooling k dispozici lokálně, používejte `byterover-retrieve-knowledge` a `byterover-store-knowledge` dle instrukcí v `docs/` pro průběžné učení asistenta.
+
+## Telemetrie & logování
+
+- `_Telemetry` tabulka sbírá anonymní eventy (preview/apply, fallback do chatu). Záznam obsahuje ISO čas, název eventu, intent a detail.
+- Fallback do chatu (`chat_fallback`) se zapisuje i při odpovědi LLM bez deterministické akce, takže lze sledovat, kdy uživatelé kladou otázky mimo podporované scénáře.
 
 ## Další implementace (navazuje na PRD)
 
@@ -43,6 +50,7 @@ V Excelu (Desktop/Web) sideload manifest: `manifest.xml`. Dev server běží na 
    - ✅ Rozpoznání `vat.add` a `format.currency` z českých frází (`Přidej DPH 21 % …`, `Nastav formát CZK …`).
    - ✅ Náhled generuje plán + ukázkové hodnoty a hlásí problémy s výběrem.
    - ✅ Apply používá stejný plán (DPH zapisuje vedlejší sloupec, formát nastavuje měnu CZK).
+   - ✅ Nově: `vat.remove` (výpočet základu bez DPH), `sheet.sort_column` (řazení vzestupně/sestupně) a `finance.dedupe`.
 2. **Undo & Audit vrstvy**
    - ✅ In-memory zásobník + perzistentní snapshoty (do 2 000 buněk) v `_UndoIndex` / `_UndoData`.
    - ✅ `Zpět` tlačítko vrací poslední akci; chyby a velké operace logují varování.

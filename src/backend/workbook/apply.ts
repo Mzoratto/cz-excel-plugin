@@ -7,6 +7,8 @@ import {
   FetchCnbRateApplyPayload,
   FxConvertCnbApplyPayload,
   FinanceDedupeApplyPayload,
+  SortColumnApplyPayload,
+  VatRemoveApplyPayload,
   SeedHolidaysApplyPayload,
   NetworkdaysDueApplyPayload
 } from "../intents/types";
@@ -15,6 +17,7 @@ import { captureUndoSnapshot } from "./undo";
 import { recordAuditEntry } from "./audit";
 import { ensureCnbRate } from "./cnb";
 import { seedCzechHolidays, loadHolidaySet, calculateBusinessDueDate } from "./holidays";
+import { recordTelemetryEvent } from "./telemetry";
 import { formatISODate } from "../utils/date";
 
 const CZK_NUMBER_FORMAT = '[$-cs-CZ]#,##0.00 "Kč"';
@@ -72,6 +75,10 @@ async function applyVat(preview: IntentPreview<VatAddApplyPayload>): Promise<App
       rangeAddress: snapshot.address,
       note
     });
+    await recordTelemetryEvent(context, {
+      event: "apply",
+      intent: preview.intent.type
+    });
 
     await context.sync();
     return snapshot;
@@ -120,6 +127,10 @@ async function applyFormatCzk(preview: IntentPreview<FormatCzkApplyPayload>): Pr
       },
       rangeAddress: snapshot.address,
       note
+    });
+    await recordTelemetryEvent(context, {
+      event: "apply",
+      intent: preview.intent.type
     });
 
     await context.sync();
@@ -173,6 +184,10 @@ async function applyFinanceDedupe(preview: IntentPreview<FinanceDedupeApplyPaylo
       rangeAddress: range.address,
       note
     });
+    await recordTelemetryEvent(context, {
+      event: "apply",
+      intent: preview.intent.type
+    });
     await context.sync();
 
     return { snapshot: undoSnapshot, removed: result.removed };
@@ -189,6 +204,142 @@ async function applyFinanceDedupe(preview: IntentPreview<FinanceDedupeApplyPaylo
 
   return {
     message,
+    warnings
+  };
+}
+
+async function applySortColumn(preview: IntentPreview<SortColumnApplyPayload>): Promise<ApplyResult> {
+  const payload = preview.applyPayload;
+  const letter = columnLetterFromIndex(payload.columnIndex);
+  const note = `Seřadit ${letter} ${payload.ascending ? "vzestupně" : "sestupně"}`;
+
+  const { snapshot } = await Excel.run(async (context) => {
+    const sheet = context.workbook.worksheets.getItem(payload.sheetName);
+    const range = sheet.getRangeByIndexes(payload.rowIndex, payload.columnIndex, payload.rowCount, payload.columnCount);
+
+    const undoSnapshot = await captureUndoSnapshot(context, {
+      sheetName: payload.sheetName,
+      rowIndex: payload.rowIndex,
+      columnIndex: payload.columnIndex,
+      rowCount: payload.rowCount,
+      columnCount: payload.columnCount,
+      note
+    });
+
+    const sort = range.getSort();
+    sort.apply([
+      {
+        key: 0,
+        ascending: payload.ascending,
+        sortOn: Excel.SortOn.value
+      }
+    ], false, payload.hasHeader);
+
+    await recordAuditEntry(context, {
+      intent: preview.intent.type,
+      args: {
+        column: letter,
+        ascending: payload.ascending
+      },
+      rangeAddress: range.address,
+      note
+    });
+    await recordTelemetryEvent(context, {
+      event: "apply",
+      intent: preview.intent.type
+    });
+    await context.sync();
+
+    return { snapshot: undoSnapshot };
+  });
+
+  const warnings = snapshot.persisted
+    ? undefined
+    : ["Operace příliš velká pro trvalé Zpět; aktuální stav lze vrátit jen pomocí poslední akce Zpět."];
+
+  return {
+    message: `Sloupec ${letter} seřazen ${payload.ascending ? "vzestupně" : "sestupně"}.`,
+    warnings
+  };
+}
+
+async function applyVatRemove(preview: IntentPreview<VatRemoveApplyPayload>): Promise<ApplyResult> {
+  const payload = preview.applyPayload;
+  const sourceLetter = columnLetterFromIndex(payload.columnIndex);
+  const baseLetter = columnLetterFromIndex(payload.columnIndex + 1);
+  const vatLetter = columnLetterFromIndex(payload.columnIndex + 2);
+  const note = `DPH ${payload.rateLabel} z ${sourceLetter}`;
+
+  const { snapshot } = await Excel.run(async (context) => {
+    const sheet = context.workbook.worksheets.getItem(payload.sheetName);
+    const baseRange = sheet.getRangeByIndexes(payload.rowIndex, payload.columnIndex + 1, payload.rowCount, 1);
+    const vatRange = sheet.getRangeByIndexes(payload.rowIndex, payload.columnIndex + 2, payload.rowCount, 1);
+
+    const undoSnapshot = await captureUndoSnapshot(context, {
+      sheetName: payload.sheetName,
+      rowIndex: payload.rowIndex,
+      columnIndex: payload.columnIndex + 1,
+      rowCount: payload.rowCount,
+      columnCount: 2,
+      note
+    });
+
+    if (payload.hasHeader && payload.rowCount > 0) {
+      baseRange.getCell(0, 0).values = [[`Bez DPH (${payload.rateLabel})`]];
+      vatRange.getCell(0, 0).values = [[`DPH ${payload.rateLabel}`]];
+    }
+
+    const dataRowCount = payload.hasHeader ? payload.rowCount - 1 : payload.rowCount;
+    if (dataRowCount > 0) {
+      const startOffset = payload.hasHeader ? 1 : 0;
+      const baseDataRange =
+        dataRowCount === payload.rowCount
+          ? baseRange
+          : baseRange.getCell(startOffset, 0).getResizedRange(dataRowCount - 1, 0);
+      const vatDataRange =
+        dataRowCount === payload.rowCount
+          ? vatRange
+          : vatRange.getCell(startOffset, 0).getResizedRange(dataRowCount - 1, 0);
+
+      const rateFactor = 1 + payload.rate;
+      const baseFormula = `=RC[-1]/${rateFactor}`;
+      const vatFormula = "=RC[-2]-RC[-1]";
+
+      baseDataRange.formulasR1C1 = Array.from({ length: dataRowCount }, () => [baseFormula]);
+      vatDataRange.formulasR1C1 = Array.from({ length: dataRowCount }, () => [vatFormula]);
+
+      const currencyFormat = Array.from({ length: dataRowCount }, () => [CZK_NUMBER_FORMAT]);
+      baseDataRange.numberFormat = currencyFormat;
+      vatDataRange.numberFormat = currencyFormat;
+    }
+
+    await recordAuditEntry(context, {
+      intent: preview.intent.type,
+      args: {
+        sourceColumn: sourceLetter,
+        baseColumn: baseLetter,
+        vatColumn: vatLetter,
+        rate: payload.rate,
+        rateLabel: payload.rateLabel
+      },
+      rangeAddress: baseRange.address,
+      note
+    });
+    await recordTelemetryEvent(context, {
+      event: "apply",
+      intent: preview.intent.type
+    });
+    await context.sync();
+
+    return { snapshot: undoSnapshot };
+  });
+
+  const warnings = snapshot.persisted
+    ? undefined
+    : ["Operace příliš velká pro trvalé Zpět; aktuální stav lze vrátit jen pomocí poslední akce Zpět."];
+
+  return {
+    message: `Vypočítán základ bez DPH a částka DPH ze sloupce ${sourceLetter}.`,
     warnings
   };
 }
@@ -218,6 +369,10 @@ async function applyFetchCnbRate(
       args: { currency, targetDate, source: outcome.source, rate: outcome.rate },
       rangeAddress: range.address,
       note
+    });
+    await recordTelemetryEvent(context, {
+      event: "apply",
+      intent: preview.intent.type
     });
     await context.sync();
 
@@ -291,6 +446,10 @@ async function applyFxConvertCnb(
       rangeAddress: undoSnapshot.address,
       note
     });
+    await recordTelemetryEvent(context, {
+      event: "apply",
+      intent: preview.intent.type
+    });
     await context.sync();
 
     return { snapshot: undoSnapshot, rate: rateOutcome.rate, source: rateOutcome.source };
@@ -344,6 +503,10 @@ async function applySeedHolidays(
       args: { year, count: seededEntries.length },
       rangeAddress: rangeAfter.address,
       note
+    });
+    await recordTelemetryEvent(context, {
+      event: "apply",
+      intent: preview.intent.type
     });
     await context.sync();
 
@@ -405,6 +568,10 @@ async function applyNetworkdaysDue(
       rangeAddress: targetRange.address,
       note
     });
+    await recordTelemetryEvent(context, {
+      event: "apply",
+      intent: preview.intent.type
+    });
     await context.sync();
 
     return {
@@ -436,6 +603,10 @@ export async function applyIntent(preview: IntentPreview): Promise<ApplyResult> 
       return applyFormatCzk(preview as IntentPreview<FormatCzkApplyPayload>);
     case IntentType.FinanceDedupe:
       return applyFinanceDedupe(preview as IntentPreview<FinanceDedupeApplyPayload>);
+    case IntentType.SortColumn:
+      return applySortColumn(preview as IntentPreview<SortColumnApplyPayload>);
+    case IntentType.VatRemove:
+      return applyVatRemove(preview as IntentPreview<VatRemoveApplyPayload>);
     case IntentType.FetchCnbRate:
       return applyFetchCnbRate(preview as IntentPreview<FetchCnbRateApplyPayload>);
     case IntentType.FxConvertCnb:

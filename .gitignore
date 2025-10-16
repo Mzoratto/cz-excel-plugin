@@ -3,6 +3,7 @@ dist
 .DS_Store
 *.log
 release/
+manifest.generated*.xml
 .clinerules/byterover-rules.md
 .kilocode/rules/byterover-rules.md
 .roo/rules/byterover-rules.md

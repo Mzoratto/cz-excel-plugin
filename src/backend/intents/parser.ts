@@ -5,6 +5,8 @@ import {
   FetchCnbRateIntent,
   FxConvertCnbIntent,
   FinanceDedupeIntent,
+  SortColumnIntent,
+  VatRemoveIntent,
   SeedHolidaysIntent,
   NetworkdaysDueIntent
 } from "./types";
@@ -27,6 +29,10 @@ const VAT_ALIASES: Record<string, string> = {
 
 const CZK_KEYWORDS = ["czk", "korun", "korunu", "koruny", "korunách", "korunach", "kč"];
 const DEDUPE_KEYWORDS = ["duplic", "duplik", "dedupe", "duplicit", "duplikat"];
+const SORT_KEYWORDS = ["serad", "seřaď", "sort", "seřadit", "usporadej", "uspořádej"];
+const SORT_ASC_KEYWORDS = ["vzestup", "ascending", "nahoru", "vzestupne", "vzestupně"];
+const SORT_DESC_KEYWORDS = ["sestup", "descending", "dolu", "dolů", "sestupne", "sestupně"];
+const VAT_REMOVE_KEYWORDS = ["bez dph", "odeber dph", "odstran dph", "reverse charge", "vycisti dph", "bez dane"];
 
 const COLUMN_PATTERN =
   /\bsloup(?:ec|ce|ci)\s+([a-záčďéěíňóřšťúůýž]{1,3}|\w?\d+)\b|\bs(?:loupec|l|.)\s*([a-z])\b|\bcolumn\s+([a-z])\b/iu;
@@ -92,6 +98,10 @@ function detectVatIntent(originalText: string, normalized: string): SupportedInt
     return undefined;
   }
 
+  if (VAT_REMOVE_KEYWORDS.some((keyword) => normalized.includes(keyword))) {
+    return undefined;
+  }
+
   const rateMatch = normalized.match(/(\d{1,2})(?:\s*%|\s*procent|)/);
   if (!rateMatch) {
     return undefined;
@@ -146,6 +156,48 @@ function detectDedupeIntent(originalText: string, normalized: string): FinanceDe
     columnLetter,
     originalText,
     confidence: columnLetter ? 0.85 : 0.75
+  };
+}
+
+function detectSortIntent(originalText: string, normalized: string): SortColumnIntent | undefined {
+  const mentionsSort = SORT_KEYWORDS.some((keyword) => normalized.includes(keyword));
+  if (!mentionsSort) {
+    return undefined;
+  }
+
+  const columnLetter = extractColumnLetter(originalText);
+  const mentionsAsc = SORT_ASC_KEYWORDS.some((keyword) => normalized.includes(keyword));
+  const mentionsDesc = SORT_DESC_KEYWORDS.some((keyword) => normalized.includes(keyword));
+  const direction: "asc" | "desc" = mentionsDesc ? "desc" : mentionsAsc ? "asc" : "asc";
+
+  return {
+    type: IntentType.SortColumn,
+    columnLetter,
+    direction,
+    originalText,
+    confidence: columnLetter ? 0.85 : 0.7
+  };
+}
+
+function detectVatRemoveIntent(originalText: string, normalized: string): VatRemoveIntent | undefined {
+  const mentionsRemoval = VAT_REMOVE_KEYWORDS.some((keyword) => normalized.includes(keyword));
+  if (!mentionsRemoval) {
+    return undefined;
+  }
+
+  const rateMatch = normalized.match(/(\d{1,2})(?:\s*%|\s*procent|\s*dph)/);
+  const rateKey = rateMatch?.[1] ?? "21";
+  const rateValue = VAT_RATES[rateKey] ?? VAT_RATES["21"];
+  const rateLabel = VAT_ALIASES[rateKey] ?? `${rateKey} %`;
+  const columnLetter = extractColumnLetter(originalText);
+
+  return {
+    type: IntentType.VatRemove,
+    rate: rateValue,
+    rateLabel,
+    columnLetter,
+    originalText,
+    confidence: columnLetter ? 0.85 : 0.7
   };
 }
 
@@ -261,6 +313,8 @@ export function parseCzechRequest(text: string): ParsedIntentOutcome | null {
     detectVatIntent,
     detectFormatIntent,
     detectDedupeIntent,
+    detectVatRemoveIntent,
+    detectSortIntent,
     detectFxConvertIntent,
     detectFetchCnbRateIntent,
     detectSeedHolidaysIntent,

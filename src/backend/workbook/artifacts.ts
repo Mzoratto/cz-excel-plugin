@@ -28,6 +28,11 @@ const SHEET_DEFINITIONS = [
     name: "_Settings",
     tableName: "tblSettings",
     headers: ["Key", "Value"]
+  },
+  {
+    name: "_Telemetry",
+    tableName: "tblTelemetry",
+    headers: ["Time", "Event", "Intent", "Detail"]
   }
 ];
 

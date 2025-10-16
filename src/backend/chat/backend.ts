@@ -2,6 +2,14 @@ import { ChatMessage, AssistantReply, ChatConfig } from "./types";
 
 const DEFAULT_TIMEOUT = 15000;
 
+const SYSTEM_PROMPT = `Jsi asistent pro český Excel. Odpovídej stručně v češtině.
+Pokud má akci provést deterministický agent, odpověz JSON objektem:
+{
+  "reply": "stručné vysvětlení pro uživatele",
+  "follow_up_intent": "věta v češtině, kterou agent umí zpracovat (např. 'Přidej DPH 21 % do sloupce C')"
+}
+Jinak můžeš vrátit jen text nebo JSON s polem "reply".`;
+
 export class ChatBackend {
   private readonly endpoint?: string;
   private readonly apiKey?: string;
@@ -30,6 +38,14 @@ export class ChatBackend {
     const timer = setTimeout(() => controller.abort(), this.timeoutMs);
 
     try {
+      const messages = [
+        { role: "system", content: SYSTEM_PROMPT },
+        ...history.map((message) => ({
+          role: mapRoleForLLM(message.role),
+          content: message.content
+        }))
+      ];
+
       const response = await fetch(this.endpoint, {
         method: "POST",
         headers: {
@@ -37,8 +53,8 @@ export class ChatBackend {
           ...(this.apiKey ? { Authorization: `Bearer ${this.apiKey}` } : {})
         },
         body: JSON.stringify({
-          history,
-          message: userMessage
+          messages,
+          input: userMessage
         }),
         signal: controller.signal
       });
@@ -47,18 +63,19 @@ export class ChatBackend {
         throw new Error(`Chat backend returned ${response.status}`);
       }
 
-      const payload = await response.json();
-      const content =
-        typeof payload?.message === "string"
-          ? payload.message
-          : typeof payload?.reply === "string"
-          ? payload.reply
-          : "Chat backend nevrátil odpověď.";
+      let payload: unknown;
+      try {
+        payload = await response.json();
+      } catch (error) {
+        console.warn("Chat backend nevrátil JSON", error);
+      }
+
+      const { content, metadata } = extractReply(payload, userMessage);
 
       return {
         role: "assistant",
         content,
-        metadata: typeof payload === "object" && payload ? { raw: payload } : undefined
+        metadata
       };
     } catch (error) {
       const message =
@@ -76,4 +93,39 @@ export class ChatBackend {
       clearTimeout(timer);
     }
   }
+}
+
+function mapRoleForLLM(role: ChatMessage["role"]): "user" | "assistant" | "system" {
+  if (role === "user") {
+    return "user";
+  }
+  return "assistant";
+}
+
+function extractReply(payload: unknown, fallback: string): { content: string; metadata?: Record<string, unknown> } {
+  if (!payload || typeof payload !== "object") {
+    return { content: typeof payload === "string" ? payload : fallback };
+  }
+
+  const data = payload as Record<string, unknown>;
+  const contentCandidate =
+    typeof data.reply === "string"
+      ? data.reply
+      : typeof data.message === "string"
+      ? data.message
+      : typeof data.response === "string"
+      ? data.response
+      : undefined;
+
+  const metadata: Record<string, unknown> = { raw: payload };
+
+  if (typeof data.follow_up_intent === "string" && data.follow_up_intent.trim().length > 0) {
+    metadata.followUpIntent = data.follow_up_intent.trim();
+  }
+
+  if (typeof data.notes === "string") {
+    metadata.notes = data.notes;
+  }
+
+  return { content: contentCandidate ?? fallback, metadata };
 }

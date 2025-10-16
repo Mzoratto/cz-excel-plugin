@@ -2,7 +2,15 @@ import { applyIntent } from "../../backend/workbook/apply";
 import { performUndo } from "../../backend/workbook/undo";
 import { ChatBackend } from "../../backend/chat/backend";
 import { ChatOrchestrator } from "../../backend/chat/orchestrator";
-import { appendChatMessage, clearPlan, setApplyEnabled, showPlan, showPlanFailure } from "../ui/state";
+import {
+  appendChatMessage,
+  clearPlan,
+  hideTypingIndicator,
+  setApplyEnabled,
+  showPlan,
+  showPlanFailure,
+  showTypingIndicator
+} from "../ui/state";
 import { IntentPreview } from "../../backend/intents/types";
 
 const orchestrator = new ChatOrchestrator(new ChatBackend());
@@ -25,6 +33,7 @@ export async function handleUserRequest(input: string): Promise<void> {
     return;
   }
 
+  showTypingIndicator();
   try {
     const outcome = await orchestrator.handleUserMessage(request);
     appendChatMessage(outcome.userMessage);
@@ -56,6 +65,8 @@ export async function handleUserRequest(input: string): Promise<void> {
       content: message,
       timestamp: new Date().toISOString()
     });
+  } finally {
+    hideTypingIndicator();
   }
 }
 

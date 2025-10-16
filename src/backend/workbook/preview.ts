@@ -14,6 +14,10 @@ import {
   FxConvertCnbApplyPayload,
   FinanceDedupeIntent,
   FinanceDedupeApplyPayload,
+  SortColumnIntent,
+  SortColumnApplyPayload,
+  VatRemoveIntent,
+  VatRemoveApplyPayload,
   SeedHolidaysIntent,
   SeedHolidaysApplyPayload,
   NetworkdaysDueIntent,
@@ -128,6 +132,32 @@ function buildVatSample(intent: VatAddIntent, selection: SelectionSnapshot, hasH
 
   return {
     headers: ["Základ", `DPH ${intent.rateLabel}`, "S DPH"],
+    rows
+  };
+}
+
+function buildVatRemoveSample(intent: VatRemoveIntent, selection: SelectionSnapshot, hasHeader: boolean): SampleTable {
+  const rows: string[][] = [];
+  const dataRows = selection.sampleValues.slice(hasHeader ? 1 : 0);
+  const sampleCount = Math.min(5, dataRows.length);
+
+  for (let i = 0; i < sampleCount; i += 1) {
+    const value = parseCzechNumeric(dataRows[i]?.[0]);
+    if (value === null) {
+      rows.push(["(nenumerické)", "-", "-"]);
+      continue;
+    }
+    const base = value / (1 + intent.rate);
+    const vatAmount = value - base;
+    rows.push([formatCzk(value), formatCzk(base), formatCzk(vatAmount)]);
+  }
+
+  if (rows.length === 0) {
+    rows.push(["(žádná numerická data)", "-", "-"]);
+  }
+
+  return {
+    headers: ["S DPH", "Bez DPH", `DPH ${intent.rateLabel}`],
     rows
   };
 }
@@ -395,6 +425,124 @@ async function buildDedupePreview(
   });
 }
 
+async function buildSortPreview(intent: SortColumnIntent): Promise<PreviewResult<SortColumnApplyPayload>> {
+  return Excel.run(async (context) => {
+    const selection = await captureSelection(context);
+    if ("error" in selection) {
+      return { error: selection.error };
+    }
+
+    const issues: string[] = [];
+    const singleColumnIssue = ensureSingleColumn(selection);
+    if (singleColumnIssue) {
+      issues.push(singleColumnIssue);
+    }
+
+    const columnConflict = validateColumnMatch(intent.columnLetter, selection);
+    if (columnConflict) {
+      issues.push(columnConflict);
+    }
+
+    if (selection.rowCount <= 1) {
+      issues.push("Rozsah musí obsahovat alespoň dva řádky.");
+    }
+
+    if (issues.length > 0) {
+      return { error: "Nelze připravit náhled pro seřazení.", issues };
+    }
+
+    const hasHeader = detectHeader(selection);
+    const selectedLetter = columnLetterFromIndex(selection.columnIndex);
+    const directionLabel = intent.direction === "asc" ? "vzestupně" : "sestupně";
+
+    const planItems = [
+      `Seřadit hodnoty ve sloupci ${selectedLetter} ${directionLabel}.`,
+      hasHeader ? "Zachovat hlavičku mimo řazení." : "Řadit všechny řádky včetně prvního.",
+      "Zapsat informaci o akci do auditu."
+    ];
+
+    const applyPayload: SortColumnApplyPayload = {
+      sheetName: selection.sheetName,
+      rowIndex: selection.rowIndex,
+      columnIndex: selection.columnIndex,
+      rowCount: selection.rowCount,
+      columnCount: selection.columnCount,
+      hasHeader,
+      ascending: intent.direction === "asc"
+    };
+
+    return {
+      intent,
+      issues: [],
+      planText: buildPlanList(planItems),
+      sample: {
+        headers: ["Poznámka"],
+        rows: [[`Ukázka po seřazení se zobrazí až po provedení akce.`]]
+      },
+      applyPayload
+    };
+  });
+}
+
+async function buildVatRemovePreview(intent: VatRemoveIntent): Promise<PreviewResult<VatRemoveApplyPayload>> {
+  return Excel.run(async (context) => {
+    const selection = await captureSelection(context);
+    if ("error" in selection) {
+      return { error: selection.error };
+    }
+
+    const issues: string[] = [];
+    const singleColumnIssue = ensureSingleColumn(selection);
+    if (singleColumnIssue) {
+      issues.push(singleColumnIssue);
+    }
+
+    const columnConflict = validateColumnMatch(intent.columnLetter, selection);
+    if (columnConflict) {
+      issues.push(columnConflict);
+    }
+
+    if (selection.rowCount <= 1) {
+      issues.push("Rozsah musí obsahovat alespoň jeden řádek s daty pod hlavičkou.");
+    }
+
+    if (issues.length > 0) {
+      return { error: "Nelze připravit náhled pro odebrání DPH.", issues };
+    }
+
+    const hasHeader = detectHeader(selection);
+    const selectedLetter = columnLetterFromIndex(selection.columnIndex);
+    const baseLetter = columnLetterFromIndex(selection.columnIndex + 1);
+    const vatLetter = columnLetterFromIndex(selection.columnIndex + 2);
+
+    const sample = buildVatRemoveSample(intent, selection, hasHeader);
+
+    const planItems = [
+      `Spočítat základ bez DPH ${intent.rateLabel} z hodnot ve sloupci ${selectedLetter}.`,
+      `Vyplnit sloupec ${baseLetter} hodnotami bez DPH a sloupec ${vatLetter} výší DPH.`,
+      "Nastavit formát měny CZK a zapsat akci do auditu."
+    ];
+
+    const applyPayload: VatRemoveApplyPayload = {
+      sheetName: selection.sheetName,
+      columnIndex: selection.columnIndex,
+      rowIndex: selection.rowIndex,
+      rowCount: selection.rowCount,
+      hasHeader,
+      rate: intent.rate,
+      rateLabel: intent.rateLabel
+    };
+
+    return {
+      intent,
+      issues: [],
+      planText: buildPlanList(planItems),
+      sample,
+      applyPayload
+    };
+  });
+}
+
 async function buildFetchCnbPreview(
   intent: FetchCnbRateIntent
 ): Promise<PreviewResult<FetchCnbRateApplyPayload>> {
@@ -606,6 +754,10 @@ export async function buildPreview(intent: SupportedIntent): Promise<PreviewResu
       return buildFormatPreview(intent);
     case IntentType.FinanceDedupe:
       return buildDedupePreview(intent);
+    case IntentType.SortColumn:
+      return buildSortPreview(intent);
+    case IntentType.VatRemove:
+      return buildVatRemovePreview(intent);
     case IntentType.FetchCnbRate:
       return buildFetchCnbPreview(intent);
     case IntentType.FxConvertCnb:

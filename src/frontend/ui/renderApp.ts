@@ -115,6 +115,12 @@ export function renderApp() {
 
   bindQuickActions(input);
   bindFormHandlers(input);
+  root.addEventListener("click", (event) => {
+    const target = event.target as HTMLElement | null;
+    if (target && target.dataset.role === "plan-apply") {
+      handleApplyRequest().catch((error) => console.error("Apply failed", error));
+    }
+  });
   clearPlan();
   input.focus();
 }

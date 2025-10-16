@@ -32,4 +32,30 @@ describe("parseCzechRequest finance intents", () => {
     expect(outcome.intent.type).toBe(IntentType.FinanceDedupe);
     expect("columnLetter" in outcome.intent ? outcome.intent.columnLetter : undefined).toBe("D");
   });
+
+  it("detects sort ascending intent", () => {
+    const outcome = parseCzechRequest("Seřaď vzestupně sloupec B");
+    expect(outcome).not.toBeNull();
+    if (!outcome) {
+      return;
+    }
+    expect(outcome.intent.type).toBe(IntentType.SortColumn);
+    if (outcome.intent.type === IntentType.SortColumn) {
+      expect(outcome.intent.columnLetter).toBe("B");
+      expect(outcome.intent.direction).toBe("asc");
+    }
+  });
+
+  it("detects vat remove intent", () => {
+    const outcome = parseCzechRequest("Odeber DPH 21 % ze sloupce C");
+    expect(outcome).not.toBeNull();
+    if (!outcome) {
+      return;
+    }
+    expect(outcome.intent.type).toBe(IntentType.VatRemove);
+    if (outcome.intent.type === IntentType.VatRemove) {
+      expect(outcome.intent.columnLetter).toBe("C");
+      expect(outcome.intent.rate).toBeCloseTo(0.21);
+    }
+  });
 });

@@ -28,6 +28,8 @@ function ensureElement<T extends HTMLElement>(selector: string): T {
   return element;
 }
 
+let typingElement: HTMLDivElement | null = null;
+
 function createMessageElement(message: ChatMessage): HTMLElement {
   const wrapper = document.createElement("div");
   wrapper.className = `chat-message chat-message--${message.role}`;
@@ -63,8 +65,29 @@ export function appendChatMessage(message: ChatMessage): void {
   if (placeholder) {
     placeholder.remove();
   }
+  hideTypingIndicator();
   thread.appendChild(createMessageElement(message));
   thread.scrollTo({ top: thread.scrollHeight, behavior: "smooth" });
+}
+
+export function showTypingIndicator(): void {
+  const thread = ensureElement<HTMLDivElement>("#chat-thread");
+  if (typingElement) {
+    return;
+  }
+  typingElement = document.createElement("div");
+  typingElement.dataset.role = "typing";
+  typingElement.className = "chat-message chat-message--assistant chat-message--typing";
+  typingElement.innerHTML = `<div class="chat-message__content">Píšu odpověď…</div>`;
+  thread.appendChild(typingElement);
+  thread.scrollTo({ top: thread.scrollHeight, behavior: "smooth" });
+}
+
+export function hideTypingIndicator(): void {
+  if (typingElement && typingElement.parentElement) {
+    typingElement.parentElement.removeChild(typingElement);
+  }
+  typingElement = null;
 }
 
 export function clearPlan(): void {
@@ -77,7 +100,8 @@ export function showPlan(preview: IntentPreview): void {
   const planHtml = `<div class="preview-plan"><pre>${escapeHtml(preview.planText)}</pre></div>`;
   const issuesHtml = renderIssues(preview.issues);
   const sampleHtml = preview.sample ? `<div class="preview-sample">${renderSampleTable(preview.sample)}</div>` : "";
-  pane.innerHTML = `${planHtml}${issuesHtml}${sampleHtml}`;
+  const actionsHtml = `<div class="plan-actions"><button type="button" class="button button--primary" data-role="plan-apply">Provést plán</button></div>`;
+  pane.innerHTML = `${planHtml}${issuesHtml}${sampleHtml}${actionsHtml}`;
 }
 
 export function showPlanFailure(preview: FailedPreview): void {
@@ -92,5 +116,9 @@ export function setApplyEnabled(isEnabled: boolean): void {
   const button = document.querySelector<HTMLButtonElement>("[data-role='apply']");
   if (button) {
     button.disabled = !isEnabled;
+  }
+  const planButton = document.querySelector<HTMLButtonElement>("[data-role='plan-apply']");
+  if (planButton) {
+    planButton.disabled = !isEnabled;
   }
 }

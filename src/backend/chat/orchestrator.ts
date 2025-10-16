@@ -4,6 +4,7 @@ import { IntentPreview, ParsedIntentOutcome, isFailedPreview, FailedPreview } fr
 import { ChatBackend } from "./backend";
 import { ChatSession } from "./session";
 import { ChatMessage } from "./types";
+import { logTelemetryEvent } from "../workbook/telemetry";
 
 export type ChatOutcome =
   | {
@@ -57,6 +58,7 @@ export class ChatOrchestrator {
         );
         return { kind: "assistant-message", assistantMessage: assistant, userMessage, failure: preview };
       }
+      await logTelemetryEvent({ event: "preview", intent: parsed.intent.type, detail: "deterministic" });
       const assistant = this.session.addMessage("action", summarizeIntent(preview, parsed));
       return {
         kind: "intent-preview",
@@ -68,7 +70,43 @@ export class ChatOrchestrator {
     }
 
     const reply = await this.backend.generateReply(this.session.getMessages(), trimmed);
+    const followUpIntentText =
+      typeof reply.metadata?.followUpIntent === "string" ? reply.metadata.followUpIntent : undefined;
+
+    if (followUpIntentText) {
+      const synthetic = parseCzechRequest(followUpIntentText);
+      if (synthetic) {
+        const preview = await buildPreview(synthetic.intent);
+        if (!isFailedPreview(preview)) {
+          const summary = summarizeIntent(preview, synthetic);
+          const content = reply.content ? `${reply.content}\n\n${summary}` : summary;
+          const assistant = this.session.addMessage("assistant", content, reply.metadata);
+          await logTelemetryEvent({ event: "preview", intent: synthetic.intent.type, detail: "llm" });
+          return {
+            kind: "intent-preview",
+            preview,
+            parsed: synthetic,
+            assistantMessage: assistant,
+            userMessage
+          };
+        }
+
+        const failureAssistant = this.session.addMessage(
+          "error",
+          `Navrženou akci se nepodařilo připravit: ${preview.error}`
+        );
+        await logTelemetryEvent({ event: "chat_fallback", detail: "llm_intent_failed" });
+        return {
+          kind: "assistant-message",
+          assistantMessage: failureAssistant,
+          userMessage,
+          failure: preview
+        };
+      }
+    }
+
     const assistant = this.session.addMessage(reply.role, reply.content, reply.metadata);
+    await logTelemetryEvent({ event: "chat_fallback", detail: reply.metadata?.followUpIntent ? "intent_parse_failed" : "conversation" });
     return {
       kind: "assistant-message",
       assistantMessage: assistant,
