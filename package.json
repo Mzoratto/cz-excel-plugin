@@ -1,0 +1,32 @@
+{
+  "name": "cz-excel-copilot",
+  "version": "0.1.0",
+  "description": "Czech-language Excel copilot add-in with preview, undo, and audit scaffolding.",
+  "private": true,
+  "engines": {
+    "node": "20.x",
+    "npm": ">=9"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "lint": "eslint \"src/**/*.{ts,tsx}\"",
+    "test": "vitest run",
+    "package": "npm run build && node tools/package-dist.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "@types/office-js": "^1.0.75",
+    "@typescript-eslint/eslint-plugin": "^8.46.1",
+    "@typescript-eslint/parser": "^8.46.1",
+    "archiver": "^7.0.1",
+    "eslint": "^8.56.0",
+    "eslint-config-prettier": "^9.0.0",
+    "eslint-plugin-import": "^2.29.0",
+    "eslint-plugin-jsdoc": "^46.9.0",
+    "eslint-plugin-promise": "^6.1.1",
+    "typescript": "^5.3.3",
+    "vite": "^5.0.0",
+    "vitest": "^1.6.0"
+  }
+}

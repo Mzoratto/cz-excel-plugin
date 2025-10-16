@@ -1,0 +1,278 @@
+import {
+  IntentType,
+  ParsedIntentOutcome,
+  SupportedIntent,
+  FetchCnbRateIntent,
+  FxConvertCnbIntent,
+  FinanceDedupeIntent,
+  SeedHolidaysIntent,
+  NetworkdaysDueIntent
+} from "./types";
+import { normalizeCzechText } from "../utils/text";
+import { formatISODate, parseCzechDateExpression } from "../utils/date";
+
+const VAT_RATES: Record<string, number> = {
+  "21": 0.21,
+  "15": 0.15,
+  "12": 0.12,
+  "10": 0.1
+};
+
+const VAT_ALIASES: Record<string, string> = {
+  "21": "21 %",
+  "15": "15 %",
+  "12": "12 %",
+  "10": "10 %"
+};
+
+const CZK_KEYWORDS = ["czk", "korun", "korunu", "koruny", "korunách", "korunach", "kč"];
+const DEDUPE_KEYWORDS = ["duplic", "duplik", "dedupe", "duplicit", "duplikat"];
+
+const COLUMN_PATTERN =
+  /\bsloup(?:ec|ce|ci)\s+([a-záčďéěíňóřšťúůýž]{1,3}|\w?\d+)\b|\bs(?:loupec|l|.)\s*([a-z])\b|\bcolumn\s+([a-z])\b/iu;
+
+const CURRENCY_PATTERN = /\b([A-Z]{3})\b/;
+const SUPPORTED_CURRENCIES = new Set([
+  "AUD",
+  "BGN",
+  "BRL",
+  "CAD",
+  "CHF",
+  "CNY",
+  "DKK",
+  "EUR",
+  "GBP",
+  "HKD",
+  "HUF",
+  "IDR",
+  "ILS",
+  "INR",
+  "ISK",
+  "JPY",
+  "KRW",
+  "MXN",
+  "MYR",
+  "NOK",
+  "NZD",
+  "PHP",
+  "PLN",
+  "RON",
+  "SEK",
+  "SGD",
+  "THB",
+  "TRY",
+  "USD",
+  "XDR",
+  "ZAR"
+]);
+
+const NUMBER_PATTERN = /(-?\d+)/;
+
+function extractColumnLetter(source: string): string | undefined {
+  const match = source.match(COLUMN_PATTERN);
+  if (!match) {
+    return undefined;
+  }
+
+  const candidate = (match[1] ?? match[2] ?? match[3] ?? "").trim();
+  if (!candidate) {
+    return undefined;
+  }
+
+  const letter = candidate[0];
+  if (!/[a-z]/i.test(letter)) {
+    return undefined;
+  }
+
+  return letter.toUpperCase();
+}
+
+function detectVatIntent(originalText: string, normalized: string): SupportedIntent | undefined {
+  if (!/\b(dph|vat)\b/.test(normalized)) {
+    return undefined;
+  }
+
+  const rateMatch = normalized.match(/(\d{1,2})(?:\s*%|\s*procent|)/);
+  if (!rateMatch) {
+    return undefined;
+  }
+
+  const rateKey = rateMatch[1];
+  const rate = VAT_RATES[rateKey];
+  if (typeof rate !== "number") {
+    return undefined;
+  }
+
+  const columnLetter = extractColumnLetter(originalText);
+
+  return {
+    type: IntentType.VatAdd,
+    rate,
+    rateLabel: VAT_ALIASES[rateKey] ?? `${rateKey} %`,
+    columnLetter,
+    originalText,
+    confidence: columnLetter ? 0.95 : 0.85
+  };
+}
+
+function detectFormatIntent(originalText: string, normalized: string): SupportedIntent | undefined {
+  const hasFormatKeyword = normalized.includes("format") || normalized.includes("formát");
+  const hasCzkKeyword = CZK_KEYWORDS.some((keyword) => normalized.includes(keyword));
+
+  if (!(hasFormatKeyword && hasCzkKeyword)) {
+    return undefined;
+  }
+
+  const columnLetter = extractColumnLetter(originalText);
+
+  return {
+    type: IntentType.FormatCzk,
+    columnLetter,
+    originalText,
+    confidence: columnLetter ? 0.9 : 0.8
+  };
+}
+
+function detectDedupeIntent(originalText: string, normalized: string): FinanceDedupeIntent | undefined {
+  const mentionsDedupe = DEDUPE_KEYWORDS.some((keyword) => normalized.includes(keyword));
+  if (!mentionsDedupe) {
+    return undefined;
+  }
+
+  const columnLetter = extractColumnLetter(originalText);
+
+  return {
+    type: IntentType.FinanceDedupe,
+    columnLetter,
+    originalText,
+    confidence: columnLetter ? 0.85 : 0.75
+  };
+}
+
+function detectFetchCnbRateIntent(originalText: string, normalized: string): FetchCnbRateIntent | undefined {
+  if (!normalized.includes("kurz") || !normalized.includes("cnb")) {
+    return undefined;
+  }
+
+  const currencyMatch = originalText.toUpperCase().match(CURRENCY_PATTERN);
+  const currency = currencyMatch?.[1];
+  if (!currency || !SUPPORTED_CURRENCIES.has(currency)) {
+    return undefined;
+  }
+
+  const date = parseCzechDateExpression(originalText);
+  const targetDate = formatISODate(date ?? new Date());
+
+  return {
+    type: IntentType.FetchCnbRate,
+    currency,
+    targetDate,
+    source: "auto",
+    originalText,
+    confidence: 0.85
+  };
+}
+
+function detectFxConvertIntent(originalText: string, normalized: string): FxConvertCnbIntent | undefined {
+  const conversionKeywords = ["preved", "převeď", "přepoč", "prepoc"];
+  const hasConvertKeyword = conversionKeywords.some((keyword) => normalized.includes(keyword));
+  const mentionsCzk = CZK_KEYWORDS.some((keyword) => normalized.includes(keyword));
+  const mentionsCnb = normalized.includes("cnb");
+
+  if (!(hasConvertKeyword && mentionsCzk && mentionsCnb)) {
+    return undefined;
+  }
+
+  const currencyMatch = originalText.toUpperCase().match(CURRENCY_PATTERN);
+  const currency = currencyMatch?.[1];
+  if (!currency || currency === "CZK" || !SUPPORTED_CURRENCIES.has(currency)) {
+    return undefined;
+  }
+
+  const date = parseCzechDateExpression(originalText);
+  const targetDate = formatISODate(date ?? new Date());
+  const columnLetter = extractColumnLetter(originalText);
+
+  return {
+    type: IntentType.FxConvertCnb,
+    currency,
+    targetDate,
+    columnLetter,
+    originalText,
+    confidence: columnLetter ? 0.9 : 0.8
+  };
+}
+
+function detectSeedHolidaysIntent(originalText: string, normalized: string): SeedHolidaysIntent | undefined {
+  if (!normalized.includes("svatk") && !normalized.includes("svátk")) {
+    return undefined;
+  }
+
+  const yearMatch = originalText.match(/\b(20\d{2})\b/);
+  const year = yearMatch ? Number(yearMatch[1]) : new Date().getFullYear();
+
+  if (year < 2000 || year > 2100) {
+    return undefined;
+  }
+
+  return {
+    type: IntentType.SeedHolidays,
+    year,
+    originalText,
+    confidence: 0.9
+  };
+}
+
+function detectNetworkdaysIntent(originalText: string, normalized: string): NetworkdaysDueIntent | undefined {
+  if (!normalized.includes("pracovn") && !normalized.includes("business") && !normalized.includes("sla")) {
+    return undefined;
+  }
+
+  const numberMatch = normalized.match(NUMBER_PATTERN);
+  if (!numberMatch) {
+    return undefined;
+  }
+
+  const businessDays = parseInt(numberMatch[1], 10);
+  if (!Number.isFinite(businessDays) || businessDays === 0 || Math.abs(businessDays) > 365) {
+    return undefined;
+  }
+
+  const startDate = parseCzechDateExpression(originalText);
+
+  return {
+    type: IntentType.NetworkdaysDue,
+    businessDays,
+    startDate: startDate ? formatISODate(startDate) : undefined,
+    originalText,
+    confidence: 0.8
+  };
+}
+
+export function parseCzechRequest(text: string): ParsedIntentOutcome | null {
+  const trimmed = text.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  const normalized = normalizeCzechText(trimmed);
+
+  const detectors: Array<(original: string, normalized: string) => SupportedIntent | undefined> = [
+    detectVatIntent,
+    detectFormatIntent,
+    detectDedupeIntent,
+    detectFxConvertIntent,
+    detectFetchCnbRateIntent,
+    detectSeedHolidaysIntent,
+    detectNetworkdaysIntent
+  ];
+
+  for (const detector of detectors) {
+    const intent = detector(trimmed, normalized);
+    if (intent) {
+      return { intent, issues: [] };
+    }
+  }
+
+  return null;
+}

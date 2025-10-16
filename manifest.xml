@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<OfficeApp
+  xmlns="http://schemas.microsoft.com/office/appforoffice/1.1"
+  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  xmlns:bt="http://schemas.microsoft.com/office/officeappbasictypes/1.0"
+  xmlns:ov="http://schemas.microsoft.com/office/taskpaneappversionoverrides"
+  xsi:type="TaskPaneApp">
+  <Id>1c4a34c6-615d-4cf6-8f3c-c69d0a5b023b</Id>
+  <Version>0.1.0.0</Version>
+  <ProviderName>CZ Excel Copilot</ProviderName>
+  <DefaultLocale>cs-CZ</DefaultLocale>
+  <DisplayName DefaultValue="CZ Excel Copilot" />
+  <Description DefaultValue="Český copilota panel pro Excel s náhledem, Zpět a auditní stopou." />
+  <IconUrl DefaultValue="https://localhost:5173/assets/icon-32.png" />
+  <HighResolutionIconUrl DefaultValue="https://localhost:5173/assets/icon-64.png" />
+  <SupportUrl DefaultValue="https://example.com/support" />
+  <AppDomains />
+  <Hosts>
+    <Host Name="Workbook" />
+  </Hosts>
+  <Requirements>
+    <Sets>
+      <Set Name="ExcelApi" MinVersion="1.13" />
+    </Sets>
+  </Requirements>
+  <DefaultSettings>
+    <SourceLocation DefaultValue="https://localhost:5173/taskpane.html" />
+  </DefaultSettings>
+  <Permissions>ReadWriteDocument</Permissions>
+  <VersionOverrides Version="1.0" xsi:type="ov:VersionOverrides">
+    <ov:Hosts>
+      <ov:Host xsi:type="ov:Excel">
+        <ov:DesktopFormFactor>
+          <ov:GetStarted>
+            <ov:Title resid="resid.GetStarted.Title" />
+            <ov:Description resid="resid.GetStarted.Description" />
+            <ov:LearnMoreUrl resid="resid.GetStarted.LearnMoreUrl" />
+          </ov:GetStarted>
+          <ov:FunctionFile resid="resid.FunctionFile.Url" />
+          <ov:ExtensionPoint xsi:type="ov:PrimaryCommandSurface">
+            <ov:OfficeTab id="TabHome">
+              <ov:Group id="resid.CustomTabGroup" label="CZ Copilot">
+                <ov:Label resid="resid.CustomTabGroup.Label" />
+                <ov:Icon>
+                  <ov:bt:Image size="16" resid="resid.Icon.16" />
+                  <ov:bt:Image size="32" resid="resid.Icon.32" />
+                  <ov:bt:Image size="80" resid="resid.Icon.80" />
+                </ov:Icon>
+                <ov:Control xsi:type="ov:Button" id="resid.TaskpaneButton">
+                  <ov:Label resid="resid.TaskpaneButton.Label" />
+                  <ov:Supertip>
+                    <ov:Title resid="resid.TaskpaneButton.TooltipTitle" />
+                    <ov:Description resid="resid.TaskpaneButton.TooltipDescription" />
+                  </ov:Supertip>
+                  <ov:Icon>
+                    <ov:bt:Image size="16" resid="resid.Icon.16" />
+                    <ov:bt:Image size="32" resid="resid.Icon.32" />
+                    <ov:bt:Image size="80" resid="resid.Icon.80" />
+                  </ov:Icon>
+                  <ov:Action xsi:type="ov:ShowTaskpane">
+                    <ov:TaskpaneId>ButtonId1</ov:TaskpaneId>
+                    <ov:SourceLocation resid="resid.Taskpane.Url" />
+                  </ov:Action>
+                </ov:Control>
+              </ov:Group>
+            </ov:OfficeTab>
+          </ov:ExtensionPoint>
+        </ov:DesktopFormFactor>
+      </ov:Host>
+    </ov:Hosts>
+    <ov:Resources>
+      <ov:bt:Images>
+        <ov:bt:Image id="resid.Icon.16" DefaultValue="https://localhost:5173/assets/icon-16.png" />
+        <ov:bt:Image id="resid.Icon.32" DefaultValue="https://localhost:5173/assets/icon-32.png" />
+        <ov:bt:Image id="resid.Icon.80" DefaultValue="https://localhost:5173/assets/icon-80.png" />
+      </ov:bt:Images>
+      <ov:bt:Urls>
+        <ov:bt:Url id="resid.Taskpane.Url" DefaultValue="https://localhost:5173/taskpane.html" />
+        <ov:bt:Url id="resid.FunctionFile.Url" DefaultValue="https://localhost:5173/taskpane.html" />
+        <ov:bt:Url id="resid.GetStarted.LearnMoreUrl" DefaultValue="https://example.com/learn-more" />
+      </ov:bt:Urls>
+      <ov:bt:ShortStrings>
+        <ov:bt:String id="resid.GetStarted.Title" DefaultValue="Začni s CZ Copilotem" />
+        <ov:bt:String id="resid.CustomTabGroup.Label" DefaultValue="CZ Copilot" />
+        <ov:bt:String id="resid.TaskpaneButton.Label" DefaultValue="Otevřít panel CZ Copilot" />
+        <ov:bt:String id="resid.TaskpaneButton.TooltipTitle" DefaultValue="CZ Copilot" />
+      </ov:bt:ShortStrings>
+      <ov:bt:LongStrings>
+        <ov:bt:String id="resid.GetStarted.Description" DefaultValue="Získej rychlou pomoc s českými financemi v Excelu." />
+        <ov:bt:String id="resid.TaskpaneButton.TooltipDescription" DefaultValue="Otevři pravý panel a zadávej požadavky v češtině." />
+      </ov:bt:LongStrings>
+    </ov:Resources>
+  </VersionOverrides>
+</OfficeApp>
