@@ -35,4 +35,8 @@ declare namespace Excel {
      */
     sparklineGroups: Excel.SparklineGroupCollection;
   }
+
+  interface ConditionalFormatCollection {
+    add(type: Excel.ConditionalFormatType, scope?: Excel.ConditionalFormatScopeType): Excel.ConditionalFormat;
+  }
 }

@@ -28,6 +28,8 @@ import {
   PeriodSummaryApplyPayload,
   RollingWindowIntent,
   RollingWindowApplyPayload,
+  VarianceVsBudgetIntent,
+  VarianceVsBudgetApplyPayload,
   PeriodComparisonIntent,
   PeriodComparisonApplyPayload,
   SeedHolidaysIntent,
@@ -904,6 +906,92 @@ async function buildRollingWindowPreview(
   });
 }
 
+async function buildVariancePreview(
+  intent: VarianceVsBudgetIntent
+): Promise<PreviewResult<VarianceVsBudgetApplyPayload>> {
+  return Excel.run(async (context) => {
+    const selection = await captureSelection(context);
+    if ("error" in selection) {
+      return { error: selection.error };
+    }
+
+    const issues: string[] = [];
+
+    if (selection.columnCount < 3) {
+      issues.push("Vyber alespoň tři sloupce: datum, skutečnost a plán.");
+    }
+
+    const hasHeader = detectHeader(selection);
+    const dateLetter = intent.dateColumn ?? columnLetterFromIndex(selection.columnIndex);
+    const actualLetter =
+      intent.actualColumn ?? columnLetterFromIndex(selection.columnIndex + Math.min(1, selection.columnCount - 1));
+    const budgetLetter =
+      intent.budgetColumn ?? columnLetterFromIndex(selection.columnIndex + Math.min(2, selection.columnCount - 1));
+
+    const dateAbsolute = columnIndexFromLetter(dateLetter ?? "");
+    const actualAbsolute = columnIndexFromLetter(actualLetter ?? "");
+    const budgetAbsolute = columnIndexFromLetter(budgetLetter ?? "");
+
+    if (dateAbsolute === null || actualAbsolute === null || budgetAbsolute === null) {
+      issues.push("Nepodařilo se určit sloupce Datum/Skutečnost/Plán.");
+    } else {
+      const dateOffset = dateAbsolute - selection.columnIndex;
+      const actualOffset = actualAbsolute - selection.columnIndex;
+      const budgetOffset = budgetAbsolute - selection.columnIndex;
+      if (dateOffset < 0 || dateOffset >= selection.columnCount) {
+        issues.push(`Sloupec s daty (${dateLetter}) není součástí výběru.`);
+      }
+      if (actualOffset < 0 || actualOffset >= selection.columnCount) {
+        issues.push(`Skutečnost (${actualLetter}) není součástí výběru.`);
+      }
+      if (budgetOffset < 0 || budgetOffset >= selection.columnCount) {
+        issues.push(`Plán (${budgetLetter}) není součástí výběru.`);
+      }
+    }
+
+    if (issues.length > 0) {
+      return { error: "Nelze připravit analýzu odchylek.", issues };
+    }
+
+    const planItems = [
+      `Vypočítat rozdíl Skutečnost (${actualLetter}) vs. Plán (${budgetLetter}).`,
+      "Zobrazit absolutní a procentní odchylku, přidat podmíněné formátování.",
+      "Výsledky zapsat do listu _Variance a zapsat audit + telemetrii."
+    ];
+
+    const sample: SampleTable = {
+      headers: ["Metoda", "Popis"],
+      rows: [
+        ["Absolutní odchylka", "Skutečnost - Plán"],
+        ["Procentní odchylka", "(Skutečnost / Plán) - 1"],
+        ["Formátování", "Červená = negativní, zelená = pozitivní"],
+        ["Trend", "Přidán sloupcový graf"],
+        ["Poznámka", "Zahrnuje agregaci podle měsíců"]
+      ]
+    };
+
+    const applyPayload: VarianceVsBudgetApplyPayload = {
+      sheetName: selection.sheetName,
+      rowIndex: selection.rowIndex,
+      columnIndex: selection.columnIndex,
+      rowCount: selection.rowCount,
+      columnCount: selection.columnCount,
+      hasHeader,
+      actualColumnLetter: actualLetter!,
+      budgetColumnLetter: budgetLetter!,
+      dateColumnLetter: dateLetter!
+    };
+
+    return {
+      intent,
+      issues: [],
+      planText: buildPlanList(planItems),
+      sample,
+      applyPayload
+    };
+  });
+}
+
 async function buildPeriodSummaryPreview(
   intent: PeriodSummaryIntent
 ): Promise<PreviewResult<PeriodSummaryApplyPayload>> {
@@ -1208,6 +1296,8 @@ export async function buildPreview(intent: SupportedIntent): Promise<PreviewResu
       return buildPeriodSummaryPreview(intent);
     case IntentType.RollingWindow:
       return buildRollingWindowPreview(intent);
+    case IntentType.VarianceVsBudget:
+      return buildVariancePreview(intent);
     case IntentType.FetchCnbRate:
       return buildFetchCnbPreview(intent);
     case IntentType.FxConvertCnb:

@@ -14,6 +14,7 @@ import {
   MonthlyRunRateApplyPayload,
   PeriodSummaryApplyPayload,
   RollingWindowApplyPayload,
+  VarianceVsBudgetApplyPayload,
   PeriodComparisonApplyPayload,
   SeedHolidaysApplyPayload,
   NetworkdaysDueApplyPayload
@@ -989,6 +990,153 @@ async function applyPeriodSummary(preview: IntentPreview<PeriodSummaryApplyPaylo
   };
 }
 
+async function applyVarianceVsBudget(
+  preview: IntentPreview<VarianceVsBudgetApplyPayload>
+): Promise<ApplyResult> {
+  const payload = preview.applyPayload;
+  const actualAbsolute = columnIndexFromLetter(payload.actualColumnLetter);
+  const budgetAbsolute = columnIndexFromLetter(payload.budgetColumnLetter);
+  const dateAbsolute = columnIndexFromLetter(payload.dateColumnLetter);
+  if (actualAbsolute === null || budgetAbsolute === null || dateAbsolute === null) {
+    throw new Error("Nelze určit sloupce pro analýzu odchylek.");
+  }
+
+  const outcome = await Excel.run(async (context) => {
+    const sheet = context.workbook.worksheets.getItem(payload.sheetName);
+    const range = sheet.getRangeByIndexes(payload.rowIndex, payload.columnIndex, payload.rowCount, payload.columnCount);
+    range.load("values");
+    await context.sync();
+
+    const data = range.values as (string | number | boolean | Date)[][];
+    const dataStart = payload.hasHeader ? 1 : 0;
+    const actualOffset = actualAbsolute - payload.columnIndex;
+    const budgetOffset = budgetAbsolute - payload.columnIndex;
+    const dateOffset = dateAbsolute - payload.columnIndex;
+
+    const rows: Array<{ month: string; actual: number; budget: number }> = [];
+
+    for (let i = dataStart; i < data.length; i += 1) {
+      const row = data[i];
+      if (!row) {
+        continue;
+      }
+      const actual = parseCzechNumeric(row[actualOffset]);
+      const budget = parseCzechNumeric(row[budgetOffset]);
+      if (actual === null || budget === null) {
+        continue;
+      }
+      const rawDate = row[dateOffset];
+      let jsDate: Date;
+      if (typeof rawDate === "object" && rawDate !== null && "getTime" in (rawDate as object)) {
+        jsDate = new Date((rawDate as Date).getTime());
+      } else if (typeof rawDate === "string" || typeof rawDate === "number") {
+        jsDate = new Date(rawDate);
+      } else {
+        continue;
+      }
+      if (Number.isNaN(jsDate.getTime())) {
+        continue;
+      }
+      const monthLabel = `${jsDate.getUTCFullYear()}-${String(jsDate.getUTCMonth() + 1).padStart(2, "0")}`;
+      rows.push({ month: monthLabel, actual, budget });
+    }
+
+    if (rows.length === 0) {
+      throw new Error("Výběr neobsahuje platná data pro odchylku.");
+    }
+
+    const grouped = new Map<string, { actual: number; budget: number }>();
+    for (const row of rows) {
+      const bucket = grouped.get(row.month) ?? { actual: 0, budget: 0 };
+      bucket.actual += row.actual;
+      bucket.budget += row.budget;
+      grouped.set(row.month, bucket);
+    }
+
+    const sortedMonths = Array.from(grouped.keys()).sort();
+
+    const actualColIndex = payload.columnIndex + payload.columnCount;
+    const percentColIndex = actualColIndex + 2;
+
+    const outputRange = sheet.getRangeByIndexes(payload.rowIndex, actualColIndex, payload.rowCount, 3);
+    const undoSnapshot = await captureUndoSnapshot(context, {
+      sheetName: payload.sheetName,
+      rowIndex: payload.rowIndex,
+      columnIndex: actualColIndex,
+      rowCount: payload.rowCount,
+      columnCount: 3,
+      note: "Variance vs Budget"
+    });
+
+    const headerRow = payload.hasHeader
+      ? [["Skutečnost", "Odchylka", "%"]]
+      : [];
+    const dataRows = payload.hasHeader
+      ? sortedMonths.map((month) => {
+          const values = grouped.get(month)!;
+          const variance = values.actual - values.budget;
+          const pct = values.budget === 0 ? "" : variance / values.budget;
+          return [values.actual, variance, pct];
+        })
+      : rows.map((row) => {
+          const variance = row.actual - row.budget;
+          const pct = row.budget === 0 ? "" : variance / row.budget;
+          return [row.actual, variance, pct];
+        });
+
+    outputRange.values = [...headerRow, ...dataRows];
+
+    const bodyStart = payload.rowIndex + (payload.hasHeader ? 1 : 0);
+    const bodyRowCount = payload.rowCount - (payload.hasHeader ? 1 : 0);
+    if (bodyRowCount > 0) {
+      const absoluteRange = sheet.getRangeByIndexes(bodyStart, actualColIndex, bodyRowCount, 2);
+      absoluteRange.numberFormat = Array.from({ length: bodyRowCount }, () => [CZK_NUMBER_FORMAT, CZK_NUMBER_FORMAT]);
+      const percentRange = sheet.getRangeByIndexes(bodyStart, percentColIndex, bodyRowCount, 1);
+      percentRange.numberFormat = Array.from({ length: bodyRowCount }, () => ["0.00%"]);
+
+      const formatRange = sheet.getRangeByIndexes(bodyStart, percentColIndex, bodyRowCount, 1);
+      const cf = formatRange.conditionalFormats.add(Excel.ConditionalFormatType.colorScale);
+      cf.colorScale.criteria = {
+        minimum: { type: Excel.ConditionalFormatColorCriterionType.lowestValue },
+        midpoint: { type: Excel.ConditionalFormatColorCriterionType.percent, formula: "50" },
+        maximum: { type: Excel.ConditionalFormatColorCriterionType.highestValue }
+      };
+    }
+
+    await recordAuditEntry(context, {
+      intent: preview.intent.type,
+      args: {
+        columns: {
+          actual: payload.actualColumnLetter,
+          budget: payload.budgetColumnLetter,
+          date: payload.dateColumnLetter
+        }
+      },
+      rangeAddress: outputRange.address,
+      note: "Variance vs Budget"
+    });
+    await recordTelemetryEvent(context, {
+      event: "apply",
+      intent: preview.intent.type
+    });
+    await context.sync();
+
+    return {
+      snapshot: undoSnapshot,
+      resultColumnStart: actualColIndex
+    };
+  });
+
+  const warnings = outcome.snapshot.persisted
+    ? undefined
+    : ["Operace příliš velká pro trvalé Zpět; aktuální stav lze vrátit jen pomocí poslední akce Zpět."];
+
+  return {
+    message: `Analýza odchylky připravena (sloupce od ${columnLetterFromIndex(outcome.resultColumnStart)}).`,
+    warnings
+  };
+}
+
 async function applyRollingWindow(preview: IntentPreview<RollingWindowApplyPayload>): Promise<ApplyResult> {
   const payload = preview.applyPayload;
   const amountAbsolute = columnIndexFromLetter(payload.amountColumnLetter);
@@ -1409,6 +1557,8 @@ export async function applyIntent(preview: IntentPreview): Promise<ApplyResult> 
       return applyPeriodComparison(preview as IntentPreview<PeriodComparisonApplyPayload>);
     case IntentType.RollingWindow:
       return applyRollingWindow(preview as IntentPreview<RollingWindowApplyPayload>);
+    case IntentType.VarianceVsBudget:
+      return applyVarianceVsBudget(preview as IntentPreview<VarianceVsBudgetApplyPayload>);
     case IntentType.FetchCnbRate:
       return applyFetchCnbRate(preview as IntentPreview<FetchCnbRateApplyPayload>);
     case IntentType.FxConvertCnb:

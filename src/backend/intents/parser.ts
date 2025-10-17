@@ -12,6 +12,7 @@ import {
   MonthlyRunRateIntent,
   PeriodSummaryIntent,
   RollingWindowIntent,
+  VarianceVsBudgetIntent,
   PeriodComparisonIntent,
   SeedHolidaysIntent,
   NetworkdaysDueIntent
@@ -43,6 +44,7 @@ const RUNRATE_KEYWORDS = ["run-rate", "runrate", "run rate"];
 const PERIOD_COMPARISON_KEYWORDS = ["mezimesic", "meziměs", "mom", "qoq", "yoy", "meziroční", "meziměsíční", "čtvrtletní", "quarter", "year over year"];
 const PERIOD_SUMMARY_KEYWORDS = ["ytd", "mtd", "qtd", "year to date", "month to date", "quarter to date", "souhrn z", "aktualni rok"];
 const ROLLING_WINDOW_KEYWORDS = ["rolling", "klouzav", "rolling window", "rolling 12", "rolling 6"];
+const VARIANCE_KEYWORDS = ["odchylka", "variance", "vs budget", "rozpočet", "rozpocet", "skutečnost", "skutecnost"];
 const HIGHLIGHT_NEGATIVE_KEYWORDS = ["zvyrazni zaporna", "zvýrazni záporná", "highlight negative", "zvyrazni minus", "obarvi zaporne"];
 const SUM_KEYWORDS = ["součet", "soucet", "sumuj", "sum", "souhrn", "total"];
 
@@ -469,6 +471,7 @@ export function parseCzechRequest(text: string): ParsedIntentOutcome | null {
     detectRollingWindowIntent,
     detectSumIntent,
     detectMonthlyRunRateIntent,
+    detectVarianceVsBudgetIntent,
     detectPeriodComparisonIntent,
     detectFxConvertIntent,
     detectFetchCnbRateIntent,
@@ -484,4 +487,24 @@ export function parseCzechRequest(text: string): ParsedIntentOutcome | null {
   }
 
   return null;
+}
+function detectVarianceVsBudgetIntent(originalText: string, normalized: string): VarianceVsBudgetIntent | undefined {
+  const mentionsVariance = VARIANCE_KEYWORDS.some((keyword) => normalized.includes(keyword));
+  if (!mentionsVariance) {
+    return undefined;
+  }
+
+  const roles = extractColumnRoles(originalText);
+  const actualColumn = roles.find((entry) => /skute|actual/.test(entry.label.toLowerCase()))?.letter;
+  const budgetColumn = roles.find((entry) => /plán|plan|budget/.test(entry.label.toLowerCase()))?.letter;
+  const dateColumn = roles.find((entry) => /datum|date/.test(entry.label.toLowerCase()))?.letter;
+
+  return {
+    type: IntentType.VarianceVsBudget,
+    actualColumn,
+    budgetColumn,
+    dateColumn,
+    originalText,
+    confidence: actualColumn && budgetColumn ? 0.85 : 0.6
+  };
 }

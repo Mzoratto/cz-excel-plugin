@@ -11,6 +11,7 @@ export enum IntentType {
   MonthlyRunRate = "analysis.monthly_runrate",
   PeriodSummary = "analysis.period_summary",
   RollingWindow = "analysis.rolling_window",
+  VarianceVsBudget = "analysis.variance_vs_budget",
   PeriodComparison = "analysis.period_comparison",
   SeedHolidays = "holidays.seed",
   NetworkdaysDue = "schedule.networkdays_due"
@@ -103,6 +104,13 @@ export interface RollingWindowIntent extends IntentBase {
   aggregation: "sum" | "avg";
 }
 
+export interface VarianceVsBudgetIntent extends IntentBase {
+  type: IntentType.VarianceVsBudget;
+  actualColumn?: string;
+  budgetColumn?: string;
+  dateColumn?: string;
+}
+
 export interface SeedHolidaysIntent extends IntentBase {
   type: IntentType.SeedHolidays;
   year: number;
@@ -125,6 +133,7 @@ export type SupportedIntent =
   | HighlightNegativeIntent
   | SumColumnIntent
   | MonthlyRunRateIntent
+  | VarianceVsBudgetIntent
   | PeriodSummaryIntent
   | RollingWindowIntent
   | PeriodComparisonIntent
@@ -276,6 +285,18 @@ export interface RollingWindowApplyPayload {
   aggregation: "sum" | "avg";
 }
 
+export interface VarianceVsBudgetApplyPayload {
+  sheetName: string;
+  rowIndex: number;
+  columnIndex: number;
+  rowCount: number;
+  columnCount: number;
+  hasHeader: boolean;
+  actualColumnLetter: string;
+  budgetColumnLetter: string;
+  dateColumnLetter: string;
+}
+
 export type ApplyPayload =
   | VatAddApplyPayload
   | FormatCzkApplyPayload
@@ -289,6 +310,7 @@ export type ApplyPayload =
   | MonthlyRunRateApplyPayload
   | PeriodSummaryApplyPayload
   | RollingWindowApplyPayload
+  | VarianceVsBudgetApplyPayload
   | PeriodComparisonApplyPayload
   | SeedHolidaysApplyPayload
   | NetworkdaysDueApplyPayload;
