@@ -13,6 +13,7 @@ import {
   SumColumnApplyPayload,
   MonthlyRunRateApplyPayload,
   PeriodSummaryApplyPayload,
+  RollingWindowApplyPayload,
   PeriodComparisonApplyPayload,
   SeedHolidaysApplyPayload,
   NetworkdaysDueApplyPayload
@@ -988,6 +989,151 @@ async function applyPeriodSummary(preview: IntentPreview<PeriodSummaryApplyPaylo
   };
 }
 
+async function applyRollingWindow(preview: IntentPreview<RollingWindowApplyPayload>): Promise<ApplyResult> {
+  const payload = preview.applyPayload;
+  const amountAbsolute = columnIndexFromLetter(payload.amountColumnLetter);
+  const dateAbsolute = columnIndexFromLetter(payload.dateColumnLetter);
+  if (amountAbsolute === null || dateAbsolute === null) {
+    throw new Error("Nelze určit sloupce pro rolling window.");
+  }
+
+  const outcome = await Excel.run(async (context) => {
+    const sheet = context.workbook.worksheets.getItem(payload.sheetName);
+    const range = sheet.getRangeByIndexes(payload.rowIndex, payload.columnIndex, payload.rowCount, payload.columnCount);
+    range.load("values");
+    await context.sync();
+
+    const data = range.values as (string | number | boolean | Date)[][];
+    const dataStart = payload.hasHeader ? 1 : 0;
+    const amountOffset = amountAbsolute - payload.columnIndex;
+    const dateOffset = dateAbsolute - payload.columnIndex;
+
+    const entries: Array<{ date: Date; amount: number }> = [];
+
+    for (let i = dataStart; i < data.length; i += 1) {
+      const row = data[i];
+      if (!row) {
+        continue;
+      }
+      const amount = parseCzechNumeric(row[amountOffset]);
+      if (amount === null) {
+        continue;
+      }
+      const rawDate = row[dateOffset];
+      let jsDate: Date;
+      if (typeof rawDate === "object" && rawDate !== null && "getTime" in (rawDate as object)) {
+        jsDate = new Date((rawDate as Date).getTime());
+      } else if (typeof rawDate === "string" || typeof rawDate === "number") {
+        jsDate = new Date(rawDate);
+      } else {
+        continue;
+      }
+      if (Number.isNaN(jsDate.getTime())) {
+        continue;
+      }
+      entries.push({ date: jsDate, amount });
+    }
+
+    if (entries.length === 0) {
+      throw new Error("Výběr neobsahuje platná data pro rolling window.");
+    }
+
+    entries.sort((a, b) => a.date.getTime() - b.date.getTime());
+
+    const windowSize = payload.windowSize;
+    const aggregation = payload.aggregation;
+
+    const resultColumnIndex = payload.columnIndex + payload.columnCount; // append new column
+    const values: number[] = [];
+    const dates: Date[] = [];
+
+    const queue: number[] = [];
+    let sum = 0;
+
+    for (const entry of entries) {
+      dates.push(entry.date);
+      queue.push(entry.amount);
+      sum += entry.amount;
+
+      if (queue.length > windowSize) {
+        sum -= queue.shift()!;
+      }
+
+      const windowLength = queue.length;
+      if (aggregation === "avg") {
+        values.push(windowLength > 0 ? sum / windowLength : 0);
+      } else {
+        values.push(sum);
+      }
+    }
+
+    // Write results to new column next to original selection
+    const startRow = payload.rowIndex + (payload.hasHeader ? 1 : 0);
+    const resultRange = sheet.getRangeByIndexes(startRow, resultColumnIndex, values.length, 1);
+
+    const undoSnapshot = await captureUndoSnapshot(context, {
+      sheetName: payload.sheetName,
+      rowIndex: payload.rowIndex,
+      columnIndex: resultColumnIndex,
+      rowCount: payload.rowCount,
+      columnCount: 1,
+      note: "Rolling window"
+    });
+
+    resultRange.values = values.map((value) => [value]);
+    resultRange.numberFormat = Array.from({ length: values.length }, () => [CZK_NUMBER_FORMAT]);
+
+    if (payload.hasHeader) {
+      const headerCell = sheet.getRangeByIndexes(payload.rowIndex, resultColumnIndex, 1, 1);
+      headerCell.values = [[`Rolling ${windowSize} (${aggregation === "avg" ? "AVG" : "SUM"})`]];
+    }
+
+    // Sparklines sheet (optional small chart)
+    const sparkSheetName = "_Rolling";
+    let sparkSheet = context.workbook.worksheets.getItemOrNullObject(sparkSheetName);
+    await context.sync();
+    if (sparkSheet.isNullObject) {
+      sparkSheet = context.workbook.worksheets.add(sparkSheetName);
+    }
+    const sparkRange = sparkSheet.getRange("A1");
+    sparkRange.values = [["Rolling trend"]];
+    const sparklineRange = sparkSheet.getRange("A2");
+    sparklineRange.sparklineGroups.add("line", resultRange);
+
+    await recordAuditEntry(context, {
+      intent: preview.intent.type,
+      args: {
+        windowSize,
+        aggregation,
+        amountColumn: payload.amountColumnLetter,
+        dateColumn: payload.dateColumnLetter
+      },
+      rangeAddress: resultRange.address,
+      note: "Rolling window"
+    });
+    await recordTelemetryEvent(context, {
+      event: "apply",
+      intent: preview.intent.type
+    });
+    await context.sync();
+
+    return {
+      snapshot: undoSnapshot,
+      columnIndex: resultColumnIndex,
+      valueCount: values.length
+    };
+  });
+
+  const warnings = outcome.snapshot.persisted
+    ? undefined
+    : ["Operace příliš velká pro trvalé Zpět; aktuální stav lze vrátit jen pomocí poslední akce Zpět."];
+
+  return {
+    message: `Rolling window vypočteno pro ${payload.windowSize} období (sloupec ${columnLetterFromIndex(outcome.columnIndex)}).`,
+    warnings
+  };
+}
+
 async function applyFetchCnbRate(
   preview: IntentPreview<FetchCnbRateApplyPayload>
 ): Promise<ApplyResult> {
@@ -1261,6 +1407,8 @@ export async function applyIntent(preview: IntentPreview): Promise<ApplyResult> 
       return applyPeriodSummary(preview as IntentPreview<PeriodSummaryApplyPayload>);
     case IntentType.PeriodComparison:
       return applyPeriodComparison(preview as IntentPreview<PeriodComparisonApplyPayload>);
+    case IntentType.RollingWindow:
+      return applyRollingWindow(preview as IntentPreview<RollingWindowApplyPayload>);
     case IntentType.FetchCnbRate:
       return applyFetchCnbRate(preview as IntentPreview<FetchCnbRateApplyPayload>);
     case IntentType.FxConvertCnb:

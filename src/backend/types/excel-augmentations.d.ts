@@ -29,5 +29,10 @@ declare namespace Excel {
      * Returns a Sort object for the range.
      */
     getSort(): Excel.Sort;
+
+    /**
+     * Returns the sparkline groups associated with the range.
+     */
+    sparklineGroups: Excel.SparklineGroupCollection;
   }
 }

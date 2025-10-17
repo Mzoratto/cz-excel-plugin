@@ -26,6 +26,8 @@ import {
   MonthlyRunRateApplyPayload,
   PeriodSummaryIntent,
   PeriodSummaryApplyPayload,
+  RollingWindowIntent,
+  RollingWindowApplyPayload,
   PeriodComparisonIntent,
   PeriodComparisonApplyPayload,
   SeedHolidaysIntent,
@@ -828,6 +830,80 @@ async function buildPeriodComparisonPreview(
   });
 }
 
+async function buildRollingWindowPreview(
+  intent: RollingWindowIntent
+): Promise<PreviewResult<RollingWindowApplyPayload>> {
+  return Excel.run(async (context) => {
+    const selection = await captureSelection(context);
+    if ("error" in selection) {
+      return { error: selection.error };
+    }
+
+    const issues: string[] = [];
+
+    if (selection.columnCount < 2) {
+      issues.push("Vyber alespoň dva sloupce: datumy a hodnoty.");
+    }
+
+    const hasHeader = detectHeader(selection);
+    const dateLetter = intent.dateColumn ?? columnLetterFromIndex(selection.columnIndex);
+    const amountLetter =
+      intent.amountColumn ?? columnLetterFromIndex(selection.columnIndex + Math.min(1, selection.columnCount - 1));
+
+    const dateAbsolute = columnIndexFromLetter(dateLetter ?? "");
+    const amountAbsolute = columnIndexFromLetter(amountLetter ?? "");
+
+    if (dateAbsolute === null || amountAbsolute === null) {
+      issues.push("Nepodařilo se určit sloupce s daty a částkami.");
+    } else {
+      const dateOffset = dateAbsolute - selection.columnIndex;
+      const amountOffset = amountAbsolute - selection.columnIndex;
+      if (dateOffset < 0 || dateOffset >= selection.columnCount) {
+        issues.push(`Sloupec s daty (${dateLetter}) není součástí výběru.`);
+      }
+      if (amountOffset < 0 || amountOffset >= selection.columnCount) {
+        issues.push(`Sloupec s částkami (${amountLetter}) není součástí výběru.`);
+      }
+    }
+
+    if (issues.length > 0) {
+      return { error: "Nelze připravit rolling window náhled.", issues };
+    }
+
+    const planItems = [
+      `Spočítat ${intent.aggregation === "avg" ? "klouzavý průměr" : "klouzavý součet"} (${intent.windowSize} období) pro hodnoty ve sloupci ${amountLetter}.`,
+      "Výsledky zapsat do nového sloupce vedle původních dat a vytvořit mini graf (sparklines).",
+      "Zapsat auditní stopu a přidat telemetrii."
+    ];
+
+    const sample: SampleTable = {
+      headers: ["Poznámka"],
+      rows: [[`Rolling ${intent.windowSize} → ${intent.aggregation === "avg" ? "průměr" : "součet"}`]]
+    };
+
+    const applyPayload: RollingWindowApplyPayload = {
+      sheetName: selection.sheetName,
+      rowIndex: selection.rowIndex,
+      columnIndex: selection.columnIndex,
+      rowCount: selection.rowCount,
+      columnCount: selection.columnCount,
+      hasHeader,
+      amountColumnLetter: amountLetter!,
+      dateColumnLetter: dateLetter!,
+      windowSize: intent.windowSize,
+      aggregation: intent.aggregation
+    };
+
+    return {
+      intent,
+      issues: [],
+      planText: buildPlanList(planItems),
+      sample,
+      applyPayload
+    };
+  });
+}
+
 async function buildPeriodSummaryPreview(
   intent: PeriodSummaryIntent
 ): Promise<PreviewResult<PeriodSummaryApplyPayload>> {
@@ -1130,6 +1206,8 @@ export async function buildPreview(intent: SupportedIntent): Promise<PreviewResu
       return buildPeriodComparisonPreview(intent);
     case IntentType.PeriodSummary:
       return buildPeriodSummaryPreview(intent);
+    case IntentType.RollingWindow:
+      return buildRollingWindowPreview(intent);
     case IntentType.FetchCnbRate:
       return buildFetchCnbPreview(intent);
     case IntentType.FxConvertCnb:

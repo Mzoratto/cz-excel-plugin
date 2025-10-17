@@ -11,6 +11,7 @@ import {
   SumColumnIntent,
   MonthlyRunRateIntent,
   PeriodSummaryIntent,
+  RollingWindowIntent,
   PeriodComparisonIntent,
   SeedHolidaysIntent,
   NetworkdaysDueIntent
@@ -41,6 +42,7 @@ const VAT_REMOVE_KEYWORDS = ["bez dph", "odeber dph", "odstran dph", "reverse ch
 const RUNRATE_KEYWORDS = ["run-rate", "runrate", "run rate"];
 const PERIOD_COMPARISON_KEYWORDS = ["mezimesic", "meziměs", "mom", "qoq", "yoy", "meziroční", "meziměsíční", "čtvrtletní", "quarter", "year over year"];
 const PERIOD_SUMMARY_KEYWORDS = ["ytd", "mtd", "qtd", "year to date", "month to date", "quarter to date", "souhrn z", "aktualni rok"];
+const ROLLING_WINDOW_KEYWORDS = ["rolling", "klouzav", "rolling window", "rolling 12", "rolling 6"];
 const HIGHLIGHT_NEGATIVE_KEYWORDS = ["zvyrazni zaporna", "zvýrazni záporná", "highlight negative", "zvyrazni minus", "obarvi zaporne"];
 const SUM_KEYWORDS = ["součet", "soucet", "sumuj", "sum", "souhrn", "total"];
 
@@ -368,6 +370,40 @@ function detectFxConvertIntent(originalText: string, normalized: string): FxConv
   };
 }
 
+function determineWindowSize(normalized: string, fallback: number): number {
+  const match = normalized.match(/(\d+)\s*(?:mesi|měsí|month|rolling|period|window)/);
+  if (match) {
+    const value = parseInt(match[1]!, 10);
+    if (Number.isFinite(value) && value > 0 && value <= 120) {
+      return value;
+    }
+  }
+  return fallback;
+}
+
+function detectRollingWindowIntent(originalText: string, normalized: string): RollingWindowIntent | undefined {
+  const mentionsRolling = ROLLING_WINDOW_KEYWORDS.some((keyword) => normalized.includes(keyword));
+  if (!mentionsRolling) {
+    return undefined;
+  }
+
+  const roles = extractColumnRoles(originalText);
+  const dateColumn = roles.find((entry) => /datum|date/.test(entry.label.toLowerCase()))?.letter;
+  const amountColumn = roles.find((entry) => /část|cast|cena|hodnot|amount|tržb|trzb/.test(entry.label.toLowerCase()))?.letter;
+  const aggregation = normalized.includes("avg") || normalized.includes("prům") ? "avg" : "sum";
+  const windowSize = determineWindowSize(normalized, 12);
+
+  return {
+    type: IntentType.RollingWindow,
+    amountColumn,
+    dateColumn,
+    windowSize,
+    aggregation,
+    originalText,
+    confidence: amountColumn && dateColumn ? 0.85 : 0.65
+  };
+}
+
 function detectSeedHolidaysIntent(originalText: string, normalized: string): SeedHolidaysIntent | undefined {
   if (!normalized.includes("svatk") && !normalized.includes("svátk")) {
     return undefined;
@@ -430,6 +466,7 @@ export function parseCzechRequest(text: string): ParsedIntentOutcome | null {
     detectSortIntent,
     detectHighlightNegativeIntent,
     detectPeriodSummaryIntent,
+    detectRollingWindowIntent,
     detectSumIntent,
     detectMonthlyRunRateIntent,
     detectPeriodComparisonIntent,
