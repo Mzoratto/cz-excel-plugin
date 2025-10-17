@@ -109,4 +109,17 @@ describe("parseCzechRequest finance intents", () => {
       expect(outcome.intent.dateColumn).toBe("A");
     }
   });
+
+  it("detects period summary intent", () => {
+    const outcome = parseCzechRequest("YTD souhrn z A (datum) a B (částky)");
+    expect(outcome).not.toBeNull();
+    if (!outcome) {
+      return;
+    }
+    expect(outcome.intent.type).toBe(IntentType.PeriodSummary);
+    if (outcome.intent.type === IntentType.PeriodSummary) {
+      expect(outcome.intent.amountColumn).toBe("B");
+      expect(outcome.intent.dateColumn).toBe("A");
+    }
+  });
 });

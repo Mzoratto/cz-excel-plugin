@@ -12,6 +12,7 @@ import {
   HighlightNegativeApplyPayload,
   SumColumnApplyPayload,
   MonthlyRunRateApplyPayload,
+  PeriodSummaryApplyPayload,
   PeriodComparisonApplyPayload,
   SeedHolidaysApplyPayload,
   NetworkdaysDueApplyPayload
@@ -24,6 +25,22 @@ import { seedCzechHolidays, loadHolidaySet, calculateBusinessDueDate } from "./h
 import { recordTelemetryEvent } from "./telemetry";
 import { formatISODate } from "../utils/date";
 import { parseCzechNumeric } from "../utils/numbers";
+
+function isBusinessDay(date: Date, holidaySet: Set<string>): boolean {
+  const day = date.getUTCDay();
+  if (day === 0 || day === 6) {
+    return false;
+  }
+  return !holidaySet.has(formatISODate(date));
+}
+
+function adjustToBusinessDay(date: Date, holidaySet: Set<string>): Date {
+  const adjusted = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+  while (!isBusinessDay(adjusted, holidaySet)) {
+    adjusted.setUTCDate(adjusted.getUTCDate() - 1);
+  }
+  return adjusted;
+}
 
 const CZK_NUMBER_FORMAT = '[$-cs-CZ]#,##0.00 "Kč"';
 const RATE_FORMATTER = new Intl.NumberFormat("cs-CZ", {
@@ -823,6 +840,154 @@ async function applyPeriodComparison(
   };
 }
 
+async function applyPeriodSummary(preview: IntentPreview<PeriodSummaryApplyPayload>): Promise<ApplyResult> {
+  const payload = preview.applyPayload;
+  const amountAbsolute = columnIndexFromLetter(payload.amountColumnLetter);
+  const dateAbsolute = columnIndexFromLetter(payload.dateColumnLetter);
+  if (amountAbsolute === null || dateAbsolute === null) {
+    throw new Error("Nelze určit sloupce pro souhrn období.");
+  }
+
+  const result = await Excel.run(async (context) => {
+    const sheet = context.workbook.worksheets.getItem(payload.sheetName);
+    const range = sheet.getRangeByIndexes(payload.rowIndex, payload.columnIndex, payload.rowCount, payload.columnCount);
+    range.load("values");
+    await context.sync();
+
+    const data = range.values as (string | number | boolean | Date)[][];
+    const dataStart = payload.hasHeader ? 1 : 0;
+    const amountOffset = amountAbsolute - payload.columnIndex;
+    const dateOffset = dateAbsolute - payload.columnIndex;
+
+    let latestDate: Date | null = null;
+    const entries: Array<{ date: Date; amount: number }> = [];
+
+    for (let i = dataStart; i < data.length; i += 1) {
+      const row = data[i];
+      if (!row) {
+        continue;
+      }
+      const amount = parseCzechNumeric(row[amountOffset]);
+      if (amount === null) {
+        continue;
+      }
+      const rawDate = row[dateOffset];
+      let jsDate: Date;
+      if (typeof rawDate === "object" && rawDate !== null && "getTime" in (rawDate as object)) {
+        jsDate = new Date((rawDate as Date).getTime());
+      } else if (typeof rawDate === "string" || typeof rawDate === "number") {
+        jsDate = new Date(rawDate);
+      } else {
+        continue;
+      }
+      if (Number.isNaN(jsDate.getTime())) {
+        continue;
+      }
+      entries.push({ date: jsDate, amount });
+      if (!latestDate || jsDate > latestDate) {
+        latestDate = jsDate;
+      }
+    }
+
+    if (!latestDate) {
+      throw new Error("Výběr neobsahuje platná data pro souhrn.");
+    }
+
+    const holidaySet = await loadHolidaySet(context);
+
+    const asOfDate = adjustToBusinessDay(latestDate, holidaySet);
+    const startOfMonth = new Date(Date.UTC(asOfDate.getUTCFullYear(), asOfDate.getUTCMonth(), 1));
+    const startOfQuarter = new Date(Date.UTC(asOfDate.getUTCFullYear(), Math.floor(asOfDate.getUTCMonth() / 3) * 3, 1));
+    const startOfYear = new Date(Date.UTC(asOfDate.getUTCFullYear(), 0, 1));
+
+    const totals = {
+      mtd: 0,
+      qtd: 0,
+      ytd: 0
+    };
+
+    for (const entry of entries) {
+      const dateUTC = new Date(Date.UTC(entry.date.getUTCFullYear(), entry.date.getUTCMonth(), entry.date.getUTCDate()));
+      if (dateUTC >= startOfMonth && dateUTC <= asOfDate) {
+        totals.mtd += entry.amount;
+      }
+      if (dateUTC >= startOfQuarter && dateUTC <= asOfDate) {
+        totals.qtd += entry.amount;
+      }
+      if (dateUTC >= startOfYear && dateUTC <= asOfDate) {
+        totals.ytd += entry.amount;
+      }
+    }
+
+    const workbook = context.workbook;
+    let outputSheet = workbook.worksheets.getItemOrNullObject("_PeriodSummary");
+    await context.sync();
+    if (outputSheet.isNullObject) {
+      outputSheet = workbook.worksheets.add("_PeriodSummary");
+    }
+
+    const usedRange = outputSheet.getUsedRangeOrNullObject();
+    await context.sync();
+    if (!usedRange.isNullObject) {
+      usedRange.clear();
+    }
+
+    const summaryRows = [
+      ["Období", "Součet"],
+      ["MTD", totals.mtd],
+      ["QTD", totals.qtd],
+      ["YTD", totals.ytd],
+      ["As of", asOfDate.toLocaleDateString("cs-CZ")]
+    ];
+
+    const outputRange = outputSheet.getRangeByIndexes(0, 0, summaryRows.length, 2);
+    const undoSnapshot = await captureUndoSnapshot(context, {
+      sheetName: outputSheet.name,
+      rowIndex: 0,
+      columnIndex: 0,
+      rowCount: summaryRows.length,
+      columnCount: 2,
+      note: "Period summary"
+    });
+
+    outputRange.values = summaryRows;
+    const amountRange = outputSheet.getRangeByIndexes(1, 1, 3, 1);
+    amountRange.numberFormat = Array.from({ length: 3 }, () => [CZK_NUMBER_FORMAT]);
+
+    await recordAuditEntry(context, {
+      intent: preview.intent.type,
+      args: {
+        asOf: asOfDate.toISOString(),
+        columns: {
+          amount: payload.amountColumnLetter,
+          date: payload.dateColumnLetter
+        }
+      },
+      rangeAddress: outputRange.address,
+      note: "Period summary"
+    });
+    await recordTelemetryEvent(context, {
+      event: "apply",
+      intent: preview.intent.type
+    });
+    await context.sync();
+
+    return {
+      worksheetName: outputSheet.name,
+      snapshot: undoSnapshot
+    };
+  });
+
+  const warnings = result.snapshot.persisted
+    ? undefined
+    : ["Operace příliš velká pro trvalé Zpět; aktuální stav lze vrátit jen pomocí poslední akce Zpět."];
+
+  return {
+    message: `Souhrn MTD/QTD/YTD připraven na listu ${result.worksheetName}.`,
+    warnings
+  };
+}
+
 async function applyFetchCnbRate(
   preview: IntentPreview<FetchCnbRateApplyPayload>
 ): Promise<ApplyResult> {
@@ -1092,6 +1257,8 @@ export async function applyIntent(preview: IntentPreview): Promise<ApplyResult> 
       return applySumColumn(preview as IntentPreview<SumColumnApplyPayload>);
     case IntentType.MonthlyRunRate:
       return applyMonthlyRunRate(preview as IntentPreview<MonthlyRunRateApplyPayload>);
+    case IntentType.PeriodSummary:
+      return applyPeriodSummary(preview as IntentPreview<PeriodSummaryApplyPayload>);
     case IntentType.PeriodComparison:
       return applyPeriodComparison(preview as IntentPreview<PeriodComparisonApplyPayload>);
     case IntentType.FetchCnbRate:

@@ -10,6 +10,7 @@ import {
   HighlightNegativeIntent,
   SumColumnIntent,
   MonthlyRunRateIntent,
+  PeriodSummaryIntent,
   PeriodComparisonIntent,
   SeedHolidaysIntent,
   NetworkdaysDueIntent
@@ -39,6 +40,7 @@ const SORT_DESC_KEYWORDS = ["sestup", "descending", "dolu", "dolů", "sestupne",
 const VAT_REMOVE_KEYWORDS = ["bez dph", "odeber dph", "odstran dph", "reverse charge", "vycisti dph", "bez dane"];
 const RUNRATE_KEYWORDS = ["run-rate", "runrate", "run rate"];
 const PERIOD_COMPARISON_KEYWORDS = ["mezimesic", "meziměs", "mom", "qoq", "yoy", "meziroční", "meziměsíční", "čtvrtletní", "quarter", "year over year"];
+const PERIOD_SUMMARY_KEYWORDS = ["ytd", "mtd", "qtd", "year to date", "month to date", "quarter to date", "souhrn z", "aktualni rok"];
 const HIGHLIGHT_NEGATIVE_KEYWORDS = ["zvyrazni zaporna", "zvýrazni záporná", "highlight negative", "zvyrazni minus", "obarvi zaporne"];
 const SUM_KEYWORDS = ["součet", "soucet", "sumuj", "sum", "souhrn", "total"];
 
@@ -163,6 +165,25 @@ function detectMonthlyRunRateIntent(originalText: string, normalized: string): M
     months,
     originalText,
     confidence: amountColumn && dateColumn ? 0.9 : 0.6
+  };
+}
+
+function detectPeriodSummaryIntent(originalText: string, normalized: string): PeriodSummaryIntent | undefined {
+  const mentionsSummary = PERIOD_SUMMARY_KEYWORDS.some((keyword) => normalized.includes(keyword));
+  if (!mentionsSummary) {
+    return undefined;
+  }
+
+  const roles = extractColumnRoles(originalText);
+  const dateColumn = roles.find((entry) => /datum|date/.test(entry.label.toLowerCase()))?.letter;
+  const amountColumn = roles.find((entry) => /část|cast|cena|hodnot|amount|tržb|trzb/.test(entry.label.toLowerCase()))?.letter;
+
+  return {
+    type: IntentType.PeriodSummary,
+    amountColumn,
+    dateColumn,
+    originalText,
+    confidence: amountColumn && dateColumn ? 0.9 : 0.65
   };
 }
 
@@ -408,6 +429,7 @@ export function parseCzechRequest(text: string): ParsedIntentOutcome | null {
     detectVatRemoveIntent,
     detectSortIntent,
     detectHighlightNegativeIntent,
+    detectPeriodSummaryIntent,
     detectSumIntent,
     detectMonthlyRunRateIntent,
     detectPeriodComparisonIntent,
