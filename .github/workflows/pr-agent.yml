@@ -1,0 +1,28 @@
+name: PR Agent
+
+# Managed by Mzoratto/pr-agent-config (sync.sh). Edit the template there, not here.
+# Deliberately no trigger on push: reviews run on open/reopen/ready and on comments (/review, /improve, /ask ...).
+on:
+  pull_request:
+    types: [opened, reopened, ready_for_review]
+  issue_comment:
+    types: [created]
+
+concurrency:
+  group: pr-agent-${{ github.event.pull_request.number || github.event.issue.number }}-${{ github.event_name }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  pr_agent:
+    # Skip bots, drafts, and comments on plain issues.
+    if: >-
+      github.event.sender.type != 'Bot' &&
+      (github.event_name == 'issue_comment' && github.event.issue.pull_request ||
+      github.event_name == 'pull_request' && !github.event.pull_request.draft)
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+    uses: Mzoratto/pr-agent-config/.github/workflows/pr-agent.yml@main
+    secrets:
+      ANTHROPIC_KEY: ${{ secrets.ANTHROPIC_KEY }}
