@@ -14,11 +14,13 @@ concurrency:
 
 jobs:
   pr_agent:
-    # Skip bots, drafts, and comments on plain issues.
+    # Skip bots, drafts, comments on plain issues, and anyone who is not OWNER/MEMBER/COLLABORATOR.
     if: >-
-      github.event.sender.type != 'Bot' &&
-      (github.event_name == 'issue_comment' && github.event.issue.pull_request ||
-      github.event_name == 'pull_request' && !github.event.pull_request.draft)
+      github.event.sender.type != 'Bot' && (
+      (github.event_name == 'pull_request' && !github.event.pull_request.draft &&
+      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.pull_request.author_association)) ||
+      (github.event_name == 'issue_comment' && github.event.issue.pull_request &&
+      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)))
     permissions:
       contents: read
       issues: write
